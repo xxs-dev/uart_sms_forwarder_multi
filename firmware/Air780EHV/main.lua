@@ -1,14 +1,14 @@
 -- =================================================================================
 -- PROJECT: UART SMS Forwarder
 -- DEVICE:  Air780EHV
--- VERSION: 1.2.2
+-- VERSION: 1.3.0
 -- 协议说明：
 --   上行（MCU -> 模块）：CMD_START:{json}:CMD_END
 --   下行（模块 -> MCU）：SMS_START:{json}:SMS_END
 -- =================================================================================
 
 PROJECT = "uart_sms_forwarder"
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 
 log.info("main", PROJECT, VERSION)
 
@@ -27,6 +27,7 @@ local sms_send_queue = {}
 local max_sms_queue_size = 20
 local legacy_sms_guard_ms = 8000
 local traffic_busy = false
+local call_forwarding_delays = {[5] = true, [10] = true, [15] = true, [20] = true, [25] = true, [30] = true}
 
 -- 3. 看门狗
 if wdt then
@@ -114,6 +115,71 @@ local function send_traffic_result(result)
     result.timestamp = os.time()
     result.connection_open = false
     send_to_uart(result)
+end
+
+local function send_call_forwarding_result(result)
+    result.type = "call_forwarding_result"
+    result.timestamp = os.time()
+    send_to_uart(result)
+end
+
+local function normalize_call_forwarding_number(raw_number)
+    local number = tostring(raw_number or "")
+    local digits = number
+    if number:sub(1, 1) == "+" then
+        digits = number:sub(2)
+    end
+    if #digits < 3 or #digits > 20 or not digits:match("^%d+$") then
+        return nil, "number must contain an optional + followed by 3 to 20 digits"
+    end
+    return number, nil
+end
+
+local function configure_call_forwarding(request_id, enabled, raw_number, raw_delay)
+    local result = {
+        request_id = tostring(request_id),
+        success = false,
+        status = "failed",
+        enabled = enabled == true,
+        number = tostring(raw_number or ""),
+        delay_seconds = tonumber(raw_delay) or 0
+    }
+
+    if not cc or type(cc.dial) ~= "function" then
+        result.error = "cc.dial API is unavailable in this core"
+        send_call_forwarding_result(result)
+        return
+    end
+
+    local mmi = "##61#"
+    if result.enabled then
+        local number, number_error = normalize_call_forwarding_number(raw_number)
+        if not number then
+            result.error = number_error
+            send_call_forwarding_result(result)
+            return
+        end
+        local delay = tonumber(raw_delay)
+        if not delay or delay ~= math.floor(delay) or not call_forwarding_delays[delay] then
+            result.error = "delay must be 5, 10, 15, 20, 25 or 30 seconds"
+            send_call_forwarding_result(result)
+            return
+        end
+        result.number = number
+        result.delay_seconds = delay
+        mmi = "**61*" .. number .. "**" .. tostring(delay) .. "#"
+    end
+
+    local call_ok, submitted = pcall(cc.dial, 0, mmi)
+    if not call_ok then
+        result.error = tostring(submitted)
+    elseif submitted ~= true then
+        result.error = "modem rejected supplementary service request"
+    else
+        result.success = true
+        result.status = "submitted"
+    end
+    send_call_forwarding_result(result)
 end
 
 local function get_http_client()
@@ -426,6 +492,14 @@ function process_uart_command(cmd_data)
             sys.taskInit(run_traffic_request, request_id, request_url, target_bytes)
         end
 
+    elseif cmd_data.action == "configure_call_forwarding" then
+        configure_call_forwarding(
+            cmd_data.request_id or os.time(),
+            cmd_data.enabled == true,
+            cmd_data.number,
+            cmd_data.delay_seconds
+        )
+
     elseif cmd_data.action == "get_status" then
         send_to_uart({
             type = "status_response",
@@ -440,6 +514,10 @@ function process_uart_command(cmd_data)
                 data_traffic = mobile and type(mobile.dataTraffic) == "function",
                 sysplus = sysplus ~= nil,
                 payload_bytes = 4096
+            },
+            call_forwarding_capabilities = {
+                no_answer = cc ~= nil and type(cc.dial) == "function",
+                delays = {5, 10, 15, 20, 25, 30}
             },
             sms_queue_depth = #sms_send_queue
         })
@@ -645,7 +723,11 @@ sys.taskInit(function()
         version = VERSION,
         data_disabled = false,
         background_data_clients = false,
-        sms_capabilities = sms_capabilities()
+        sms_capabilities = sms_capabilities(),
+        call_forwarding_capabilities = {
+            no_answer = cc ~= nil and type(cc.dial) == "function",
+            delays = {5, 10, 15, 20, 25, 30}
+        }
     })
     while true do
         sys.wait(60000)

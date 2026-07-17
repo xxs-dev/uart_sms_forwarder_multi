@@ -21,21 +21,14 @@ export default function CallRecords() {
         queryFn: getModules,
         refetchInterval: 10000,
     });
-    const preferredModule = modules.find((module) => module.name.toUpperCase().includes('EHV'))
-        || modules.find((module) => module.id === 'sim2')
-        || modules.find((module) => !module.disabled)
-        || modules[0];
-    const activeModuleId = selectedModuleId || preferredModule?.id || '';
-
     const {
         data: records = [],
         isLoading,
         isFetching,
         refetch,
     } = useQuery({
-        queryKey: ['callRecords', activeModuleId],
-        queryFn: () => getCallRecords(100, activeModuleId),
-        enabled: Boolean(activeModuleId),
+        queryKey: ['callRecords', selectedModuleId],
+        queryFn: () => getCallRecords(100, selectedModuleId || undefined),
         refetchInterval: 15000,
     });
 
@@ -44,18 +37,19 @@ export default function CallRecords() {
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">来电记录</h1>
-                    <p className="mt-1 text-sm text-gray-500">Air780EHV 检测到的来电会自动保存</p>
+                    <p className="mt-1 text-sm text-gray-500">所有模块检测到的来电会自动保存</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <select
                         aria-label="选择来电模块"
-                        value={activeModuleId}
+                        value={selectedModuleId}
                         onChange={(event) => setSelectedModuleId(event.target.value)}
                         className="h-9 max-w-[220px] rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700"
                     >
+                        <option value="">全部模块</option>
                         {modules.map((module) => (
                             <option key={module.id} value={module.id}>
-                                {module.name}{module.id === 'sim2' ? '（EHV）' : ''}{module.disabled ? '（禁用）' : ''}
+                                {module.name}{module.disabled ? '（禁用）' : ''}
                             </option>
                         ))}
                     </select>
@@ -63,7 +57,7 @@ export default function CallRecords() {
                         variant="outline"
                         size="icon-sm"
                         title="刷新来电记录"
-                        disabled={isFetching || !activeModuleId}
+                        disabled={isFetching}
                         onClick={() => refetch()}
                     >
                         <RefreshCw className={isFetching ? 'animate-spin' : ''}/>
@@ -79,7 +73,7 @@ export default function CallRecords() {
                 <div className="flex min-h-64 flex-col items-center justify-center border border-dashed border-gray-300 bg-white px-6 text-center">
                     <PhoneCall className="mb-3 h-10 w-10 text-gray-300"/>
                     <p className="font-medium text-gray-700">暂无来电记录</p>
-                    <p className="mt-1 text-sm text-gray-400">EHV 收到来电后会在这里显示号码和时间</p>
+                    <p className="mt-1 text-sm text-gray-400">模块收到来电后会在这里显示号码和时间</p>
                 </div>
             ) : (
                 <>

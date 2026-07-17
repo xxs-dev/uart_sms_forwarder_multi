@@ -47,6 +47,8 @@ type SerialService struct {
 	scheduledTaskStatusUpdater ScheduledTaskStatusUpdater
 	trafficMu                  sync.Mutex
 	pendingTraffic             map[string]chan TrafficResult
+	callForwardingMu           sync.Mutex
+	pendingCallForwarding      map[string]chan CallForwardingResult
 	wg                         sync.WaitGroup
 	// 设备信息缓存
 	deviceCache cache.Cache[string, *StatusData]
@@ -68,15 +70,16 @@ func NewSerialService(
 	propertyService *PropertyService,
 ) *SerialService {
 	service := &SerialService{
-		logger:          logger,
-		config:          config,
-		moduleID:        "default",
-		moduleName:      "默认模块",
-		textMsgService:  textMsgService,
-		notifier:        notifier,
-		propertyService: propertyService,
-		deviceCache:     cache.New[string, *StatusData](CacheTTL),
-		pendingTraffic:  make(map[string]chan TrafficResult),
+		logger:                logger,
+		config:                config,
+		moduleID:              "default",
+		moduleName:            "默认模块",
+		textMsgService:        textMsgService,
+		notifier:              notifier,
+		propertyService:       propertyService,
+		deviceCache:           cache.New[string, *StatusData](CacheTTL),
+		pendingTraffic:        make(map[string]chan TrafficResult),
+		pendingCallForwarding: make(map[string]chan CallForwardingResult),
 	}
 	service.initMessageHandlers()
 	return service

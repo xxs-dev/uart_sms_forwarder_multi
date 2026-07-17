@@ -9,6 +9,7 @@ import {Button} from '@/components/ui/button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import type {DeviceStatus} from '@/api/types';
 import {formatUptime} from "@/utils/utils.ts";
+import CallForwardingControl from '@/components/CallForwardingControl';
 
 export default function SerialControl() {
     const [to, setTo] = useState('');
@@ -428,6 +429,12 @@ export default function SerialControl() {
                     </Card>
                 </div>
             </div>
+
+            <CallForwardingControl
+                key={selectedModuleId}
+                module={selectedModule}
+                deviceStatus={deviceStatus}
+            />
         </div>
     );
 }

@@ -24,13 +24,14 @@ import (
 
 // Handlers 所有Handler的集合
 type Handlers struct {
-	Auth          *handler.AuthHandler
-	Property      *handler.PropertyHandler
-	TextMessage   *handler.TextMessageHandler
-	Serial        *handler.SerialHandler
-	ScheduledTask *handler.ScheduledTaskHandler
-	TrafficRecord *handler.TrafficRecordHandler
-	CallRecord    *handler.CallRecordHandler
+	Auth           *handler.AuthHandler
+	Property       *handler.PropertyHandler
+	TextMessage    *handler.TextMessageHandler
+	Serial         *handler.SerialHandler
+	ScheduledTask  *handler.ScheduledTaskHandler
+	TrafficRecord  *handler.TrafficRecordHandler
+	CallRecord     *handler.CallRecordHandler
+	CallForwarding *handler.CallForwardingHandler
 }
 
 func Run(configPath string) {
@@ -72,6 +73,7 @@ func setup(app *orz.App) error {
 	textMessageService := service.NewTextMessageService(logger, textMessageRepo)
 	trafficRecordService := service.NewTrafficRecordService(db)
 	callRecordService := service.NewCallRecordService(db)
+	callForwardingService := service.NewCallForwardingService(db)
 
 	// 初始化默认配置
 	ctx := context.Background()
@@ -122,15 +124,17 @@ func setup(app *orz.App) error {
 	scheduledTaskHandler := handler.NewScheduledTaskHandler(logger, schedulerService)
 	trafficRecordHandler := handler.NewTrafficRecordHandler(logger, trafficRecordService)
 	callRecordHandler := handler.NewCallRecordHandler(logger, callRecordService)
+	callForwardingHandler := handler.NewCallForwardingHandler(logger, callForwardingService, serialManager)
 
 	handlers := &Handlers{
-		Auth:          authHandler,
-		Property:      propertyHandler,
-		TextMessage:   textMessageHandler,
-		Serial:        serialHandler,
-		ScheduledTask: scheduledTaskHandler,
-		TrafficRecord: trafficRecordHandler,
-		CallRecord:    callRecordHandler,
+		Auth:           authHandler,
+		Property:       propertyHandler,
+		TextMessage:    textMessageHandler,
+		Serial:         serialHandler,
+		ScheduledTask:  scheduledTaskHandler,
+		TrafficRecord:  trafficRecordHandler,
+		CallRecord:     callRecordHandler,
+		CallForwarding: callForwardingHandler,
 	}
 
 	// 10. 设置 API 路由
@@ -175,6 +179,7 @@ func autoMigrate(db *gorm.DB) error {
 		&models.ScheduledTask{},
 		&models.TrafficRecord{},
 		&models.CallRecord{},
+		&models.CallForwardingConfig{},
 	)
 }
 
@@ -242,6 +247,8 @@ func setupApi(app *orz.App, handlers *Handlers, appConfig *config.AppConfig, log
 	api.GET("/modules/:moduleId/status", handlers.Serial.GetStatus)
 	api.POST("/modules/:moduleId/flymode", handlers.Serial.SetFlymode)
 	api.POST("/modules/:moduleId/reboot", handlers.Serial.RebootMcu)
+	api.GET("/modules/:moduleId/call-forwarding", handlers.CallForwarding.Get)
+	api.PUT("/modules/:moduleId/call-forwarding", handlers.CallForwarding.Update)
 
 	// ScheduledTask API (RESTful)
 	api.GET("/scheduled-tasks", handlers.ScheduledTask.List)

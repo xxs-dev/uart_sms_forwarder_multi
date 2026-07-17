@@ -67,6 +67,10 @@ export interface DeviceStatus {
     port_name: string;           // 串口名称
     connected: boolean;          // 串口连接状态
     version: string;             // Lua 版本
+    call_forwarding_capabilities?: {
+        no_answer: boolean;
+        delays: number[];
+    };
 }
 
 export interface SerialModule {
@@ -77,6 +81,23 @@ export interface SerialModule {
     disabled: boolean;
     status?: DeviceStatus;
     status_error?: string;
+}
+
+export interface CallForwardingConfig {
+    moduleId: string;
+    moduleName: string;
+    enabled: boolean;
+    number: string;
+    delaySeconds: number;
+    lastStatus: '' | 'submitted' | 'failed';
+    lastError: string;
+    updatedAt: number;
+}
+
+export interface CallForwardingInput {
+    enabled: boolean;
+    number: string;
+    delaySeconds: number;
 }
 
 // 手机号码响应

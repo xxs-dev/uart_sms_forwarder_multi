@@ -28,10 +28,14 @@ type StatusData struct {
 		Operator     string  `json:"operator"` // 运营商名称
 		Uptime       int64   `json:"uptime"`   // 模块开机时长，单位为秒
 	} `json:"mobile"`
-	Timestamp int    `json:"timestamp"`
-	MemKb     int    `json:"mem_kb"`
-	PortName  string `json:"port_name"` // 串口名称
-	Connected bool   `json:"connected"` // 连接状态
+	Timestamp                  int    `json:"timestamp"`
+	MemKb                      int    `json:"mem_kb"`
+	PortName                   string `json:"port_name"` // 串口名称
+	Connected                  bool   `json:"connected"` // 连接状态
+	CallForwardingCapabilities struct {
+		NoAnswer bool  `json:"no_answer"`
+		Delays   []int `json:"delays"`
+	} `json:"call_forwarding_capabilities"`
 }
 
 func (s *SerialService) handleStatusResponse(msg *ParsedMessage) {
