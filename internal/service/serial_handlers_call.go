@@ -25,6 +25,17 @@ func (s *SerialService) handleIncomingCall(msg *ParsedMessage) {
 	s.logger.Info("收到来电",
 		zap.String("from", call.From),
 		zap.Int64("timestamp", call.Timestamp))
+	if s.callRecords != nil {
+		if _, err := s.callRecords.RecordIncoming(
+			context.Background(),
+			s.ModuleID(),
+			s.ModuleName(),
+			call.From,
+			call.Timestamp,
+		); err != nil {
+			s.logger.Error("保存来电记录失败", zap.Error(err))
+		}
+	}
 
 	// 转换为通用通知消息并发送
 	notifMsg := NotificationMessage{
@@ -34,13 +45,20 @@ func (s *SerialService) handleIncomingCall(msg *ParsedMessage) {
 		Timestamp: call.Timestamp,
 	}
 
-	go s.sendNotificationMessage(context.Background(), notifMsg)
+	if s.notifier != nil && s.propertyService != nil {
+		go s.sendNotificationMessage(context.Background(), notifMsg)
+	}
 }
 
 // handleCallDisconnected 处理通话结束通知
 func (s *SerialService) handleCallDisconnected(msg *ParsedMessage) {
-	timestamp, _ := msg.Payload["timestamp"].(float64)
+	timestamp := int64Value(msg.Payload, "timestamp")
 
 	s.logger.Info("通话已结束",
-		zap.Int64("timestamp", int64(timestamp)))
+		zap.Int64("timestamp", timestamp))
+	if s.callRecords != nil {
+		if err := s.callRecords.RecordDisconnected(context.Background(), s.ModuleID(), timestamp); err != nil {
+			s.logger.Error("更新来电结束时间失败", zap.Error(err))
+		}
+	}
 }

@@ -30,6 +30,7 @@ type Handlers struct {
 	Serial        *handler.SerialHandler
 	ScheduledTask *handler.ScheduledTaskHandler
 	TrafficRecord *handler.TrafficRecordHandler
+	CallRecord    *handler.CallRecordHandler
 }
 
 func Run(configPath string) {
@@ -70,6 +71,7 @@ func setup(app *orz.App) error {
 	notifier := service.NewNotifier(logger)
 	textMessageService := service.NewTextMessageService(logger, textMessageRepo)
 	trafficRecordService := service.NewTrafficRecordService(db)
+	callRecordService := service.NewCallRecordService(db)
 
 	// 初始化默认配置
 	ctx := context.Background()
@@ -86,6 +88,7 @@ func setup(app *orz.App) error {
 		notifier,
 		propertyService,
 	)
+	serialManager.SetCallRecordService(callRecordService)
 	if defaultService := serialManager.DefaultService(); defaultService != nil {
 		if err := textMessageService.BackfillMissingModuleID(ctx, defaultService.ModuleID()); err != nil {
 			logger.Error("迁移历史短信模块归属失败", zap.Error(err))
@@ -118,6 +121,7 @@ func setup(app *orz.App) error {
 	serialHandler := handler.NewSerialHandler(logger, serialManager)
 	scheduledTaskHandler := handler.NewScheduledTaskHandler(logger, schedulerService)
 	trafficRecordHandler := handler.NewTrafficRecordHandler(logger, trafficRecordService)
+	callRecordHandler := handler.NewCallRecordHandler(logger, callRecordService)
 
 	handlers := &Handlers{
 		Auth:          authHandler,
@@ -126,6 +130,7 @@ func setup(app *orz.App) error {
 		Serial:        serialHandler,
 		ScheduledTask: scheduledTaskHandler,
 		TrafficRecord: trafficRecordHandler,
+		CallRecord:    callRecordHandler,
 	}
 
 	// 10. 设置 API 路由
@@ -169,6 +174,7 @@ func autoMigrate(db *gorm.DB) error {
 		&models.TextMessage{},
 		&models.ScheduledTask{},
 		&models.TrafficRecord{},
+		&models.CallRecord{},
 	)
 }
 
@@ -247,6 +253,9 @@ func setupApi(app *orz.App, handlers *Handlers, appConfig *config.AppConfig, log
 
 	// TrafficRecord API
 	api.GET("/traffic-records", handlers.TrafficRecord.List)
+
+	// CallRecord API
+	api.GET("/call-records", handlers.CallRecord.List)
 
 	// 健康检查接口（无需认证）
 	e.GET("/health", func(c echo.Context) error {

@@ -122,6 +122,15 @@ func (m *SerialManager) SetScheduledTaskStatusUpdater(updater ScheduledTaskStatu
 	}
 }
 
+func (m *SerialManager) SetCallRecordService(callRecords *CallRecordService) {
+	for _, module := range m.modules {
+		if module.service == nil {
+			continue
+		}
+		module.service.SetCallRecordService(callRecords)
+	}
+}
+
 func (m *SerialManager) DefaultService() *SerialService {
 	service, _ := m.GetService("")
 	return service

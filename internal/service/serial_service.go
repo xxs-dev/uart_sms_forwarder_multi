@@ -42,6 +42,7 @@ type SerialService struct {
 	textMsgService             *TextMessageService
 	notifier                   *Notifier
 	propertyService            *PropertyService
+	callRecords                *CallRecordService
 	handlers                   map[string]messageHandler
 	scheduledTaskStatusUpdater ScheduledTaskStatusUpdater
 	trafficMu                  sync.Mutex
@@ -103,6 +104,10 @@ func (s *SerialService) ModuleName() string {
 
 func (s *SerialService) SetScheduledTaskStatusUpdater(updater ScheduledTaskStatusUpdater) {
 	s.scheduledTaskStatusUpdater = updater
+}
+
+func (s *SerialService) SetCallRecordService(callRecords *CallRecordService) {
+	s.callRecords = callRecords
 }
 
 // Start 启动串口服务（使用 backoff 重连机制）

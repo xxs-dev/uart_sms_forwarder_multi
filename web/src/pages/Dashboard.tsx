@@ -235,6 +235,7 @@ export default function Dashboard() {
                 <div className="space-y-2 text-sm text-gray-600">
                     <p>• 自动接收短信并发送通知到配置的渠道</p>
                     <p>• 自动接收来电并发送通知</p>
+                    <p>• 来电记录自动保存到数据库</p>
                     <p>• 支持定时发送短信</p>
                     <p>• 支持手动发送短信和串口控制</p>
                     <p>• 当前模块：{onlineModules.length}/{modules.length || 1} 在线</p>

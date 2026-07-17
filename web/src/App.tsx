@@ -9,6 +9,7 @@ import Messages from './pages/Messages';
 import SerialControl from './pages/SerialControl';
 import NotificationChannels from './pages/NotificationChannels';
 import ScheduledTasksConfig from './pages/ScheduledTasksConfig';
+import CallRecords from './pages/CallRecords';
 import {Toaster} from "@/components/ui/sonner.tsx";
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
                     >
                         <Route index element={<Dashboard/>}/>
                         <Route path="messages" element={<Messages/>}/>
+                        <Route path="calls" element={<CallRecords/>}/>
                         <Route path="serial" element={<SerialControl/>}/>
                         <Route path="notifications" element={<NotificationChannels/>}/>
                         <Route path="scheduled-tasks" element={<ScheduledTasksConfig/>}/>

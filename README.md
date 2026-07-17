@@ -2,7 +2,7 @@
 
 基于 [dushixiang/uart_sms_forwarder](https://github.com/dushixiang/uart_sms_forwarder) 扩展的 Air780 系列短信管理平台。本版本重点增加多模块统一管理、按模块收发短信、定时流量保活，以及独立持久化的流量历史。
 
-> 当前已验证发布版：`v1.2.2-multi.1`
+> 当前已验证发布版：`v1.2.2-multi.2`
 > Lua 插件版本：`1.2.2`
 
 ## 已验证环境
@@ -15,6 +15,7 @@
 | 模块 1 | Air780EPV、Lua 插件 `1.2.2` | 在线、状态读取及流量任务通过 |
 | 模块 2 | Air780EHV、`LuatOS-SoC_V2036_Air780EHV_116.soc`、Lua 插件 `1.2.2` | 在线、状态读取及流量任务通过 |
 | 多模块 | 两个 USB 串口同时运行 | `2/2` 在线 |
+| EHV 来电 | 真实来电、挂断事件及 5 秒持续时长 | 数据库、API、桌面和手机页面均通过 |
 | 前端 | 桌面端及 390 px 手机端 | 通过，无横向溢出 |
 | 自动测试 | `go test ./...`、`npm run build` | 通过 |
 
@@ -35,6 +36,7 @@
 - 流量任务固定约 5 KB，并记录 HTTP 状态、上行、下行、总流量、连接状态及错误原因。
 - 流量历史独立保存在 SQLite 中，删除定时任务不会删除历史记录。
 - 支持来电通知，以及钉钉、企业微信、飞书、自定义 Webhook、邮件和 Telegram 通知。
+- Air780EHV 来电自动保存号码、模块、来电时间、结束时间和持续时长。
 - 保留原项目的单模块配置兼容模式。
 
 ## Lua 插件
@@ -129,8 +131,8 @@ go build -o uart_sms_forwarder ./cmd/serv
 
 当前验证镜像：
 
-- Docker Hub：`s121934/uart_sms_forwarder_multi:1.2.2-multi.1`
-- GHCR：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.2.2-multi.1`
+- Docker Hub：`s121934/uart_sms_forwarder_multi:1.2.2-multi.2`
+- GHCR：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.2.2-multi.2`
 
 ## 数据与升级
 

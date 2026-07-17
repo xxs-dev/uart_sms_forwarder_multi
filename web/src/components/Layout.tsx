@@ -1,5 +1,5 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
-import {Bell, Clock, LayoutDashboard, LogOut, MessageSquare, Smartphone} from 'lucide-react';
+import {Bell, Clock, LayoutDashboard, LogOut, MessageSquare, PhoneCall, Smartphone} from 'lucide-react';
 import {Button} from "@/components/ui/button.tsx";
 import {useQuery} from "@tanstack/react-query";
 import {getVersion} from "@/api/property.ts";
@@ -14,6 +14,7 @@ export default function Layout() {
     const navigation = [
         {name: '统计面板', href: '/', icon: LayoutDashboard},
         {name: '短信记录', href: '/messages', icon: MessageSquare},
+        {name: '来电记录', href: '/calls', icon: PhoneCall},
         {name: '串口控制', href: '/serial', icon: Smartphone},
         {name: '通知渠道', href: '/notifications', icon: Bell},
         {name: '计划任务', href: '/scheduled-tasks', icon: Clock},
@@ -143,7 +144,7 @@ export default function Layout() {
 
                 {/* 移动端底部导航 */}
                 <div className="md:hidden border-t border-gray-200 bg-white">
-                    <div className="flex justify-around py-2">
+                    <div className="grid grid-cols-6 py-2">
                         {navigation.map((item) => {
                             const Icon = item.icon;
                             const active = isActive(item.href);
@@ -151,7 +152,7 @@ export default function Layout() {
                                 <Link
                                     key={item.name}
                                     to={item.href}
-                                    className={`flex flex-col items-center px-3 py-2 text-xs font-medium transition-all duration-200 ${
+                                    className={`min-w-0 flex flex-col items-center px-1 py-2 text-xs font-medium transition-all duration-200 ${
                                         active ? 'text-blue-600' : 'text-gray-500'
                                     }`}
                                 >
