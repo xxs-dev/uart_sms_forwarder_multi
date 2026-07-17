@@ -25,6 +25,8 @@ web/.cache
 logs/
 *.db
 data/
+backups/
+firmware/
 
 # 临时文件
 *.tmp

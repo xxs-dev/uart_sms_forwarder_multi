@@ -1,9 +1,20 @@
 import {useState} from 'react';
-import {Calendar, Clock, Edit, MessageSquare, Phone, Plus, Play, Trash2, CheckCircle2, XCircle} from 'lucide-react';
+import {
+    Activity,
+    CheckCircle2,
+    Clock,
+    Edit,
+    MessageSquare,
+    Phone,
+    Play,
+    Plus,
+    Radio,
+    Trash2,
+    XCircle,
+} from 'lucide-react';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {toast} from 'sonner';
 import {Button} from '@/components/ui/button';
-import {Input} from '@/components/ui/input';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {
     Dialog,
@@ -13,509 +24,319 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {Input} from '@/components/ui/input';
+import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select';
+import {Switch} from '@/components/ui/switch';
+import {getModules} from '@/api/serial';
 import {
     createScheduledTask,
     deleteScheduledTask,
     getScheduledTasks,
-    type ScheduledTask,
     type LastRunStatus,
+    type ScheduledTask,
+    type ScheduledTaskInput,
     triggerScheduledTask,
     updateScheduledTask,
-} from '../api/scheduled_task';
+} from '@/api/scheduled_task';
 
-interface TaskFormData {
-    name: string;
-    enabled: boolean;
-    intervalDays: number;
-    phoneNumber: string;
-    content: string;
-}
+type APIError = {response?: {data?: {error?: string}}};
+
+const errorMessage = (error: unknown, fallback: string) =>
+    (error as APIError)?.response?.data?.error || fallback;
+
+const emptyForm = (moduleId = ''): ScheduledTaskInput => ({
+    name: '',
+    enabled: true,
+    intervalDays: 30,
+    taskType: 'traffic',
+    moduleId,
+    phoneNumber: '',
+    content: '',
+    trafficKB: 5,
+});
+
+const statusDisplay = (status?: LastRunStatus) => {
+    if (status === 'success') {
+        return {icon: CheckCircle2, text: '成功', color: 'text-green-700', background: 'bg-green-50'};
+    }
+    if (status === 'failed') {
+        return {icon: XCircle, text: '失败', color: 'text-red-700', background: 'bg-red-50'};
+    }
+    return {icon: Clock, text: '等待结果', color: 'text-blue-700', background: 'bg-blue-50'};
+};
 
 export default function ScheduledTasksConfig() {
     const queryClient = useQueryClient();
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
-    const [formData, setFormData] = useState<TaskFormData>({
-        name: '',
-        enabled: false,
-        intervalDays: 90,
-        phoneNumber: '',
-        content: '',
-    });
+    const [formData, setFormData] = useState<ScheduledTaskInput>(emptyForm());
 
-    // 获取状态显示信息
-    const getStatusDisplay = (status?: LastRunStatus) => {
-        switch (status) {
-            case 'success':
-                return {
-                    icon: CheckCircle2,
-                    text: '成功',
-                    colorClass: 'text-green-600',
-                    bgClass: 'bg-green-50',
-                };
-            case 'failed':
-                return {
-                    icon: XCircle,
-                    text: '失败',
-                    colorClass: 'text-red-600',
-                    bgClass: 'bg-red-50',
-                };
-            case 'unknown':
-            default:
-                return {
-                    icon: Clock,
-                    text: '发送中',
-                    colorClass: 'text-blue-600',
-                    bgClass: 'bg-blue-50',
-                };
-        }
-    };
-
-    // 获取定时任务列表
     const {data: tasks = [], isLoading} = useQuery({
         queryKey: ['scheduledTasks'],
         queryFn: getScheduledTasks,
     });
+    const {data: modules = []} = useQuery({
+        queryKey: ['serialModules'],
+        queryFn: getModules,
+    });
 
-    // 创建任务 mutation
+    const refreshTasks = () => queryClient.invalidateQueries({queryKey: ['scheduledTasks']});
+    const closeDialog = () => {
+        setDialogOpen(false);
+        setEditingTask(null);
+    };
+
     const createMutation = useMutation({
         mutationFn: createScheduledTask,
         onSuccess: () => {
-            queryClient.invalidateQueries({queryKey: ['scheduledTasks']});
-            setDialogOpen(false);
-            resetForm();
+            refreshTasks();
+            closeDialog();
             toast.success('任务创建成功');
         },
-        onError: (error: any) => {
-            console.error('创建任务失败:', error);
-            toast.error(error.response?.data?.error || '创建任务失败');
-        },
+        onError: (error: unknown) => toast.error(errorMessage(error, '创建任务失败')),
     });
-
-    // 更新任务 mutation
     const updateMutation = useMutation({
-        mutationFn: ({id, task}: { id: string; task: TaskFormData }) =>
-            updateScheduledTask(id, task),
+        mutationFn: ({id, task}: {id: string; task: ScheduledTaskInput}) => updateScheduledTask(id, task),
         onSuccess: () => {
-            queryClient.invalidateQueries({queryKey: ['scheduledTasks']});
-            setDialogOpen(false);
-            setEditingTask(null);
-            resetForm();
+            refreshTasks();
+            closeDialog();
             toast.success('任务更新成功');
         },
-        onError: (error: any) => {
-            console.error('更新任务失败:', error);
-            toast.error(error.response?.data?.error || '更新任务失败');
-        },
+        onError: (error: unknown) => toast.error(errorMessage(error, '更新任务失败')),
     });
-
-    // 删除任务 mutation
     const deleteMutation = useMutation({
         mutationFn: deleteScheduledTask,
         onSuccess: () => {
-            queryClient.invalidateQueries({queryKey: ['scheduledTasks']});
+            refreshTasks();
             toast.success('任务删除成功');
         },
-        onError: (error: any) => {
-            console.error('删除任务失败:', error);
-            toast.error(error.response?.data?.error || '删除任务失败');
-        },
+        onError: (error: unknown) => toast.error(errorMessage(error, '删除任务失败')),
     });
-
-    // 触发任务 mutation
     const triggerMutation = useMutation({
         mutationFn: triggerScheduledTask,
         onSuccess: () => {
-            queryClient.invalidateQueries({queryKey: ['scheduledTasks']});
-            toast.success('任务已触发执行');
+            refreshTasks();
+            toast.success('任务执行完成');
         },
-        onError: (error: any) => {
-            console.error('触发任务失败:', error);
-            toast.error(error.response?.data?.error || '触发任务失败');
+        onError: (error: unknown) => {
+            refreshTasks();
+            toast.error(errorMessage(error, '任务执行失败'));
         },
     });
 
-    // 重置表单
-    const resetForm = () => {
-        setFormData({
-            name: '',
-            enabled: false,
-            intervalDays: 90,
-            phoneNumber: '',
-            content: '',
-        });
+    const defaultModuleId = () =>
+        modules.find((module) => module.default && !module.disabled)?.id ||
+        modules.find((module) => !module.disabled)?.id || '';
+
+    const updateField = <K extends keyof ScheduledTaskInput>(field: K, value: ScheduledTaskInput[K]) => {
+        setFormData((current) => ({...current, [field]: value}));
     };
 
-    // 打开添加对话框
-    const handleOpenAddDialog = () => {
+    const openCreateDialog = () => {
         setEditingTask(null);
-        resetForm();
+        setFormData(emptyForm(defaultModuleId()));
         setDialogOpen(true);
     };
 
-    // 打开编辑对话框
-    const handleOpenEditDialog = (task: ScheduledTask) => {
+    const openEditDialog = (task: ScheduledTask) => {
         setEditingTask(task);
         setFormData({
             name: task.name,
             enabled: task.enabled,
             intervalDays: task.intervalDays,
-            phoneNumber: task.phoneNumber,
-            content: task.content,
+            taskType: task.taskType || 'sms',
+            moduleId: task.moduleId || defaultModuleId(),
+            phoneNumber: task.phoneNumber || '',
+            content: task.content || '',
+            trafficKB: 5,
         });
         setDialogOpen(true);
     };
 
-    // 更新表单字段
-    const updateFormField = (field: keyof TaskFormData, value: any) => {
-        setFormData({
-            ...formData,
-            [field]: value,
-        });
-    };
-
-    // 提交表单
-    const handleSubmit = () => {
-        // 验证必填字段
+    const submit = () => {
         if (!formData.name.trim()) {
             toast.warning('请输入任务名称');
             return;
         }
-        if (!formData.intervalDays || formData.intervalDays <= 0) {
-            toast.warning('请输入有效的执行间隔天数（必须大于0）');
+        if (formData.intervalDays < 1) {
+            toast.warning('执行间隔必须大于 0 天');
             return;
         }
-        if (!formData.phoneNumber.trim()) {
-            toast.warning('请输入目标手机号');
+        if (!formData.moduleId) {
+            toast.warning('请选择执行模块');
             return;
         }
-        if (!formData.content.trim()) {
-            toast.warning('请输入短信内容');
+        if (formData.taskType === 'sms' && (!formData.phoneNumber.trim() || !formData.content.trim())) {
+            toast.warning('请填写目标号码和短信内容');
             return;
         }
-
         if (editingTask) {
-            // 更新任务
             updateMutation.mutate({id: editingTask.id, task: formData});
         } else {
-            // 创建任务
             createMutation.mutate(formData);
         }
     };
 
-    // 删除任务
-    const handleDeleteTask = (id: string) => {
-        if (confirm('确定要删除这个任务吗？')) {
-            deleteMutation.mutate(id);
-        }
-    };
-
-    // 触发任务
-    const handleTriggerTask = (id: string) => {
-        if (confirm('确定要立即执行这个任务吗？')) {
-            triggerMutation.mutate(id);
-        }
-    };
-
     if (isLoading) {
-        return (
-            <div className="flex justify-center items-center py-20">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            </div>
-        );
+        return <div className="flex justify-center py-20"><div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600"/></div>;
     }
 
     return (
         <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="flex justify-between items-center pb-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4">
                 <div>
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent flex items-center gap-2">
-                        定时任务配置
-                    </h1>
-                    <p className="text-sm text-gray-500 mt-2">配置定期发送短信的任务，例如每 90
-                        天发送一次流量查询短信</p>
+                    <h1 className="text-2xl font-bold text-gray-900">定时任务</h1>
+                    <p className="mt-1 text-sm text-gray-500">短信发送与 SIM 卡流量保活</p>
                 </div>
-                <Button
-                    onClick={handleOpenAddDialog}
-                    className="bg-blue-600 hover:bg-blue-700 transition-colors px-5 py-2.5"
-                >
-                    <Plus className="w-4 h-4 mr-2"/>
-                    新建任务
-                </Button>
+                <Button onClick={openCreateDialog}><Plus/>新建任务</Button>
             </div>
 
             {tasks.length === 0 ? (
-                <div className="text-center py-20 bg-white rounded-xl border border-gray-200">
-                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Clock className="w-8 h-8 text-blue-500"/>
-                    </div>
-                    <p className="text-gray-500 mb-2 font-medium">暂无任务</p>
-                    <p className="text-gray-400 text-sm">点击"新建任务"开始配置定时短信发送</p>
+                <div className="border border-dashed border-gray-300 bg-white py-16 text-center">
+                    <Clock className="mx-auto mb-3 h-8 w-8 text-gray-400"/>
+                    <p className="text-sm text-gray-500">暂无定时任务</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {tasks.map((task) => (
-                        <Card key={task.id}
-                              className="border-gray-200 transition-all duration-200 group relative overflow-hidden">
-                            <CardHeader className="border-b border-gray-100 bg-gradient-to-br from-white to-gray-50/30">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex items-center space-x-2.5 flex-1 min-w-0">
-                                        <div
-                                            className={`p-2 rounded-lg ${task.enabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
-                                            <Calendar size={18}/>
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <CardTitle className="text-base font-bold text-gray-800 truncate">
-                                                {task.name}
-                                            </CardTitle>
-                                            <div className="flex items-center mt-1">
-                                                <span
-                                                    className={`w-1.5 h-1.5 rounded-full mr-1.5 ${task.enabled ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></span>
-                                                <span className="text-xs text-gray-500 font-medium">
-                          {task.enabled ? '运行中' : '已暂停'}
-                        </span>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {tasks.map((task) => {
+                        const isTraffic = task.taskType === 'traffic';
+                        const status = statusDisplay(task.lastRunStatus);
+                        const StatusIcon = status.icon;
+                        const module = modules.find((item) => item.id === task.moduleId);
+                        return (
+                            <Card key={task.id} className="overflow-hidden border-gray-200">
+                                <CardHeader className="border-b border-gray-100 bg-gray-50/70 pb-3">
+                                    <div className="flex min-w-0 items-start justify-between gap-3">
+                                        <div className="flex min-w-0 items-center gap-2.5">
+                                            <div className={`rounded-md p-2 ${isTraffic ? 'bg-cyan-50 text-cyan-700' : 'bg-blue-50 text-blue-700'}`}>
+                                                {isTraffic ? <Activity/> : <MessageSquare/>}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <CardTitle className="truncate text-base text-gray-900">{task.name}</CardTitle>
+                                                <span className="text-xs text-gray-500">{isTraffic ? '流量保活' : '短信发送'}</span>
                                             </div>
                                         </div>
+                                        <span className={`shrink-0 text-xs font-medium ${task.enabled ? 'text-green-700' : 'text-gray-400'}`}>
+                                            {task.enabled ? '已启用' : '已暂停'}
+                                        </span>
                                     </div>
-                                </div>
-                            </CardHeader>
-
-                            <CardContent className="">
-                                <div className="space-y-2 mb-3">
-                                    <div
-                                        className="flex items-start space-x-2 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                                        <Clock size={14} className="text-gray-400 mt-0.5 flex-shrink-0"/>
-                                        <div className="flex-1 min-w-0">
-                                            <span
-                                                className="text-xs text-gray-400 font-medium block mb-0.5">执行间隔</span>
-                                            <span
-                                                className="text-sm text-gray-700 font-semibold">每 {task.intervalDays} 天</span>
+                                </CardHeader>
+                                <CardContent className="space-y-3 pt-4">
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                        <div>
+                                            <span className="block text-xs text-gray-400">执行间隔</span>
+                                            <span className="font-medium text-gray-700">每 {task.intervalDays} 天</span>
+                                        </div>
+                                        <div>
+                                            <span className="block text-xs text-gray-400">执行模块</span>
+                                            <span className="font-medium text-gray-700">{module?.name || task.moduleId}</span>
                                         </div>
                                     </div>
 
-                                    <div
-                                        className="flex items-start space-x-2 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                                        <Phone size={14} className="text-gray-400 mt-0.5 flex-shrink-0"/>
-                                        <div className="flex-1 min-w-0">
-                                            <span
-                                                className="text-xs text-gray-400 font-medium block mb-0.5">目标号码</span>
-                                            <span
-                                                className="text-sm text-gray-700 font-mono font-semibold">{task.phoneNumber}</span>
+                                    {isTraffic ? (
+                                        <div className="flex items-center gap-2 border-y border-gray-100 py-3 text-sm">
+                                            <Radio className="h-4 w-4 text-cyan-700"/>
+                                            <span className="text-gray-500">目标流量</span>
+                                            <span className="ml-auto font-semibold text-gray-800">约 {task.trafficKB || 5} KB</span>
                                         </div>
-                                    </div>
+                                    ) : (
+                                        <div className="space-y-2 border-y border-gray-100 py-3 text-sm">
+                                            <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-gray-400"/><span className="font-mono text-gray-700">{task.phoneNumber}</span></div>
+                                            <p className="line-clamp-2 break-words text-gray-600">{task.content}</p>
+                                        </div>
+                                    )}
 
-                                    <div
-                                        className="flex items-start space-x-2 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                                        <MessageSquare size={14} className="text-gray-400 mt-0.5 flex-shrink-0"/>
-                                        <div className="flex-1 min-w-0">
-                                            <span
-                                                className="text-xs text-gray-400 font-medium block mb-0.5">短信内容</span>
-                                            <p className="text-sm text-gray-700 line-clamp-2 break-words">{task.content}</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {task.lastRunAt > 0 && (
-                                    <div className="mb-3 pb-2.5 border-b border-gray-100 space-y-2">
-                                        <div className="flex items-center text-xs">
-                                            <span className="text-gray-400">上次执行：</span>
-                                            <span className="text-gray-600 ml-1.5 font-medium">
-                        {new Date(task.lastRunAt).toLocaleString('zh-CN', {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                        })}
-                      </span>
-                                        </div>
-                                        {task.lastRunStatus && (
-                                            <div className="flex items-center gap-1.5">
-                                                <span className="text-gray-400 text-xs">执行状态：</span>
-                                                {(() => {
-                                                    const statusInfo = getStatusDisplay(task.lastRunStatus);
-                                                    const StatusIcon = statusInfo.icon;
-                                                    return (
-                                                        <div
-                                                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${statusInfo.bgClass}`}>
-                                                            <StatusIcon className={`w-3 h-3 ${statusInfo.colorClass}`}/>
-                                                            <span
-                                                                className={`text-xs font-medium ${statusInfo.colorClass}`}>
-                                                                {statusInfo.text}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })()}
+                                    {task.lastRunAt ? (
+                                        <div className="space-y-2 text-xs">
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <span className="text-gray-400">{new Date(task.lastRunAt).toLocaleString('zh-CN')}</span>
+                                                <span className={`flex items-center gap-1 rounded-full px-2 py-1 ${status.background} ${status.color}`}>
+                                                    <StatusIcon className="h-3.5 w-3.5"/>{status.text}
+                                                </span>
                                             </div>
-                                        )}
-                                    </div>
-                                )}
+                                            {task.lastRunDetail && <p className="break-words leading-5 text-gray-600">{task.lastRunDetail}</p>}
+                                        </div>
+                                    ) : null}
 
-                                <div className="flex space-x-2 pt-1">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleTriggerTask(task.id)}
-                                        disabled={triggerMutation.isPending}
-                                        className="flex-1 hover:bg-green-50 hover:border-green-300 hover:text-green-700 transition-colors text-xs font-medium"
-                                    >
-                                        <Play className="w-3.5 h-3.5 mr-1.5"/>
-                                        触发
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleOpenEditDialog(task)}
-                                        className="flex-1 hover:bg-gray-50 hover:border-gray-300 transition-colors text-xs font-medium"
-                                    >
-                                        <Edit className="w-3.5 h-3.5 mr-1.5"/>
-                                        编辑
-                                    </Button>
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        onClick={() => handleDeleteTask(task.id)}
-                                        disabled={deleteMutation.isPending}
-                                        className="px-3 hover:bg-red-700 transition-colors text-xs font-medium"
-                                    >
-                                        <Trash2 className="w-3.5 h-3.5"/>
-                                    </Button>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
+                                    <div className="flex gap-2 border-t border-gray-100 pt-3">
+                                        <Button variant="outline" size="sm" className="flex-1" disabled={triggerMutation.isPending} onClick={() => {
+                                            if (confirm('确定立即执行这个任务吗？')) triggerMutation.mutate(task.id);
+                                        }}><Play/>触发</Button>
+                                        <Button variant="outline" size="icon-sm" title="编辑" onClick={() => openEditDialog(task)}><Edit/></Button>
+                                        <Button variant="outline" size="icon-sm" title="删除" disabled={deleteMutation.isPending} className="text-red-600 hover:text-red-700" onClick={() => {
+                                            if (confirm('确定删除这个任务吗？')) deleteMutation.mutate(task.id);
+                                        }}><Trash2/></Button>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        );
+                    })}
                 </div>
             )}
 
-            {/* 添加/编辑任务对话框 */}
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className="sm:max-w-[500px]">
+            <Dialog open={dialogOpen} onOpenChange={(open) => open ? setDialogOpen(true) : closeDialog()}>
+                <DialogContent className="sm:max-w-[560px]">
                     <DialogHeader>
-                        <DialogTitle className="text-xl font-bold text-gray-800">
-                            {editingTask ? '编辑任务' : '新建任务'}
-                        </DialogTitle>
-                        <DialogDescription className="text-sm text-gray-500">
-                            {editingTask ? '修改定时任务的配置信息' : '创建新的定时短信任务，系统将按照设定的间隔自动发送'}
-                        </DialogDescription>
+                        <DialogTitle>{editingTask ? '编辑任务' : '新建任务'}</DialogTitle>
+                        <DialogDescription>选择任务类型、执行模块和周期</DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-5 py-2">
-                        {/* 任务名称 */}
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">
-                                任务名称 <span className="text-red-500">*</span>
-                            </label>
-                            <Input
-                                value={formData.name}
-                                onChange={(e) => updateFormField('name', e.target.value)}
-                                placeholder="例如：90天流量查询"
-                                className="bg-gray-50 border-gray-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                            />
+                        <div className="grid grid-cols-2 rounded-md border border-gray-200 bg-gray-50 p-1">
+                            <Button type="button" variant={formData.taskType === 'traffic' ? 'default' : 'ghost'} onClick={() => updateField('taskType', 'traffic')}>
+                                <Activity/>流量保活
+                            </Button>
+                            <Button type="button" variant={formData.taskType === 'sms' ? 'default' : 'ghost'} onClick={() => updateField('taskType', 'sms')}>
+                                <MessageSquare/>发送短信
+                            </Button>
                         </div>
 
-                        {/* 启用状态 */}
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3.5 flex items-center gap-3">
-                            <input
-                                type="checkbox"
-                                id="enabled"
-                                checked={formData.enabled}
-                                onChange={(e) => updateFormField('enabled', e.target.checked)}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
-                            />
-                            <label htmlFor="enabled"
-                                   className="text-sm font-medium text-gray-700 cursor-pointer flex-1">
-                                启用此任务
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="space-y-2 text-sm font-medium text-gray-700">
+                                <span>任务名称</span>
+                                <Input value={formData.name} onChange={(event) => updateField('name', event.target.value)} placeholder="SIM 卡流量保活"/>
                             </label>
-                            <div
-                                className={`w-2 h-2 rounded-full ${formData.enabled ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                            <label className="space-y-2 text-sm font-medium text-gray-700">
+                                <span>执行模块</span>
+                                <Select value={formData.moduleId} onValueChange={(value) => updateField('moduleId', value)}>
+                                    <SelectTrigger className="w-full"><SelectValue placeholder="选择模块"/></SelectTrigger>
+                                    <SelectContent>
+                                        {modules.map((module) => <SelectItem key={module.id} value={module.id} disabled={module.disabled}>{module.name}{module.default ? '（默认）' : ''}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </label>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            {/* 执行间隔天数 */}
-                            <div className="col-span-2 sm:col-span-1">
-                                <label
-                                    className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide flex items-center gap-1.5">
-                                    <Clock size={12} className="text-gray-400"/>
-                                    执行间隔 <span className="text-red-500">*</span>
-                                </label>
-                                <div className="relative">
-                                    <Input
-                                        type="number"
-                                        min="1"
-                                        value={formData.intervalDays}
-                                        onChange={(e) => updateFormField('intervalDays', parseInt(e.target.value) || 0)}
-                                        placeholder="90"
-                                        className="bg-gray-50 border-gray-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all pr-12"
-                                    />
-                                    <span
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-medium">天</span>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="space-y-2 text-sm font-medium text-gray-700">
+                                <span>执行间隔</span>
+                                <div className="relative"><Input type="number" min={1} value={formData.intervalDays} onChange={(event) => updateField('intervalDays', Number(event.target.value))} className="pr-10"/><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">天</span></div>
+                            </label>
+                            {formData.taskType === 'traffic' && (
+                                <div className="space-y-2 text-sm font-medium text-gray-700">
+                                    <span>单次流量</span>
+                                    <div className="flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-gray-700">约 5 KB</div>
                                 </div>
-                                <p className="text-xs text-gray-400 mt-1.5">
-                                    任务执行的时间间隔
-                                </p>
-                            </div>
-
-                            {/* 目标手机号 */}
-                            <div className="col-span-2 sm:col-span-1">
-                                <label
-                                    className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide flex items-center gap-1.5">
-                                    <Phone size={12} className="text-gray-400"/>
-                                    目标号码 <span className="text-red-500">*</span>
-                                </label>
-                                <Input
-                                    value={formData.phoneNumber}
-                                    onChange={(e) => updateFormField('phoneNumber', e.target.value)}
-                                    placeholder="10086"
-                                    className="bg-gray-50 border-gray-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
-                                />
-                                <p className="text-xs text-gray-400 mt-1.5">
-                                    接收短信的手机号码
-                                </p>
-                            </div>
+                            )}
                         </div>
 
-                        {/* 短信内容 */}
-                        <div>
-                            <label
-                                className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide flex items-center gap-1.5">
-                                <MessageSquare size={12} className="text-gray-400"/>
-                                短信内容 <span className="text-red-500">*</span>
-                            </label>
-                            <textarea
-                                value={formData.content}
-                                onChange={(e) => updateFormField('content', e.target.value)}
-                                placeholder="例如：查询流量、CXLL 等"
-                                rows={3}
-                                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all outline-none resize-none"
-                            />
-                            <p className="text-xs text-red-400 mt-1.5">
-                                将要发送的短信内容，不支持 Emoji 等特殊字符。
-                            </p>
+                        {formData.taskType === 'sms' && (
+                            <div className="space-y-4">
+                                <label className="space-y-2 text-sm font-medium text-gray-700"><span>目标号码</span><Input value={formData.phoneNumber} onChange={(event) => updateField('phoneNumber', event.target.value)} placeholder="10086"/></label>
+                                <label className="space-y-2 text-sm font-medium text-gray-700"><span>短信内容</span><textarea rows={3} value={formData.content} onChange={(event) => updateField('content', event.target.value)} className="w-full resize-none rounded-md border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"/></label>
+                            </div>
+                        )}
+
+                        <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+                            <div><p className="text-sm font-medium text-gray-700">启用任务</p><p className="text-xs text-gray-400">下一次巡检时自动执行</p></div>
+                            <Switch checked={formData.enabled} onCheckedChange={(checked) => updateField('enabled', checked)}/>
                         </div>
                     </div>
 
-                    <DialogFooter className="bg-gray-50 -mx-6 -mb-6 px-6 py-4 rounded-b-lg border-t border-gray-100">
-                        <Button
-                            variant="outline"
-                            onClick={() => {
-                                setDialogOpen(false);
-                                setEditingTask(null);
-                                resetForm();
-                            }}
-                            disabled={createMutation.isPending || updateMutation.isPending}
-                            className="hover:bg-white transition-colors"
-                        >
-                            取消
-                        </Button>
-                        <Button
-                            onClick={handleSubmit}
-                            disabled={createMutation.isPending || updateMutation.isPending}
-                            className="bg-blue-600 hover:bg-blue-700 transition-colors min-w-[100px]"
-                        >
-                            {createMutation.isPending || updateMutation.isPending
-                                ? '提交中...'
-                                : editingTask
-                                    ? '更新任务'
-                                    : '创建任务'}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={closeDialog}>取消</Button>
+                        <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+                            {createMutation.isPending || updateMutation.isPending ? '提交中...' : editingTask ? '保存' : '创建'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

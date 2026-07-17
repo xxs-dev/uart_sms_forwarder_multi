@@ -2,8 +2,20 @@
 import apiClient from "@/api/client.ts";
 
 export type LastRunStatus = 'unknown' | 'success' | 'failed';
+export type ScheduledTaskType = 'sms' | 'traffic';
 
-export interface ScheduledTask {
+export interface ScheduledTaskInput {
+    name: string;
+    enabled: boolean;
+    intervalDays: number;
+    taskType: ScheduledTaskType;
+    moduleId: string;
+    phoneNumber: string;
+    content: string;
+    trafficKB: number;
+}
+
+export interface ScheduledTask extends ScheduledTaskInput {
     id: string;
     name: string;
     enabled: boolean;
@@ -14,6 +26,7 @@ export interface ScheduledTask {
     lastRunAt?: number;
     lastMsgId?: string;
     lastRunStatus?: LastRunStatus;
+    lastRunDetail?: string;
 }
 
 // 定时任务 API (RESTful)
@@ -28,12 +41,12 @@ export const getScheduledTask = (id: string) => {
 };
 
 // 创建定时任务
-export const createScheduledTask = (task: Omit<ScheduledTask, 'id' | 'createdAt' | 'lastRunAt'>) => {
+export const createScheduledTask = (task: ScheduledTaskInput) => {
     return apiClient.post<ScheduledTask>('/scheduled-tasks', task);
 };
 
 // 更新定时任务
-export const updateScheduledTask = (id: string, task: Omit<ScheduledTask, 'id' | 'createdAt' | 'lastRunAt'>) => {
+export const updateScheduledTask = (id: string, task: ScheduledTaskInput) => {
     return apiClient.put<ScheduledTask>(`/scheduled-tasks/${id}`, task);
 };
 

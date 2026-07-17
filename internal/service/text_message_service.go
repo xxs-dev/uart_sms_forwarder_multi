@@ -52,6 +52,35 @@ func (s *TextMessageService) Save(ctx context.Context, msg *models.TextMessage) 
 	return nil
 }
 
+// BackfillMissingModuleID assigns records created before multi-module support
+// to the configured default module. Their original module cannot be recovered.
+func (s *TextMessageService) BackfillMissingModuleID(ctx context.Context, moduleID string) error {
+	if moduleID == "" {
+		return errors.New("默认短信模块 ID 不能为空")
+	}
+
+	result := s.repo.GetDB(ctx).
+		Model(&models.TextMessage{}).
+		Where("module_id IS NULL OR module_id = ?", "").
+		Update("module_id", moduleID)
+	if result.Error != nil {
+		return fmt.Errorf("迁移历史短信模块归属失败: %w", result.Error)
+	}
+	if result.RowsAffected > 0 {
+		s.logger.Info("历史短信已归入默认模块",
+			zap.String("module_id", moduleID),
+			zap.Int64("count", result.RowsAffected))
+	}
+	return nil
+}
+
+func scopeMessagesByModule(db *gorm.DB, moduleID string) *gorm.DB {
+	if moduleID == "" {
+		return db
+	}
+	return db.Where("module_id = ?", moduleID)
+}
+
 // Get 获取单条短信记录
 func (s *TextMessageService) Get(ctx context.Context, id string) (*models.TextMessage, error) {
 	msg, err := s.repo.FindById(ctx, id)
@@ -76,8 +105,8 @@ func (s *TextMessageService) Delete(ctx context.Context, id string) error {
 }
 
 // Clear 清空所有短信记录
-func (s *TextMessageService) Clear(ctx context.Context) error {
-	db := s.repo.GetDB(ctx)
+func (s *TextMessageService) Clear(ctx context.Context, moduleID string) error {
+	db := scopeMessagesByModule(s.repo.GetDB(ctx), moduleID)
 	if err := db.Where("1 = 1").Delete(&models.TextMessage{}).Error; err != nil {
 		s.logger.Error("清空短信记录失败", zap.Error(err))
 		return fmt.Errorf("清空短信记录失败: %w", err)
@@ -123,8 +152,8 @@ func (s *TextMessageService) UpdateStatusById(ctx context.Context, id string, st
 }
 
 // GetConversations 获取会话列表（按对方号码分组）
-func (s *TextMessageService) GetConversations(ctx context.Context) ([]*Conversation, error) {
-	db := s.repo.GetDB(ctx)
+func (s *TextMessageService) GetConversations(ctx context.Context, moduleID string) ([]*Conversation, error) {
+	db := scopeMessagesByModule(s.repo.GetDB(ctx), moduleID)
 
 	// 获取所有短信记录，按创建时间倒序
 	var messages []models.TextMessage
@@ -188,8 +217,8 @@ func (s *TextMessageService) GetConversations(ctx context.Context) ([]*Conversat
 }
 
 // GetConversationMessages 获取指定会话的所有消息
-func (s *TextMessageService) GetConversationMessages(ctx context.Context, peer string) ([]models.TextMessage, error) {
-	db := s.repo.GetDB(ctx)
+func (s *TextMessageService) GetConversationMessages(ctx context.Context, peer, moduleID string) ([]models.TextMessage, error) {
+	db := scopeMessagesByModule(s.repo.GetDB(ctx), moduleID)
 
 	var messages []models.TextMessage
 
@@ -206,8 +235,8 @@ func (s *TextMessageService) GetConversationMessages(ctx context.Context, peer s
 }
 
 // DeleteConversation 删除整个会话（与某个联系人的所有消息）
-func (s *TextMessageService) DeleteConversation(ctx context.Context, peer string) error {
-	db := s.repo.GetDB(ctx)
+func (s *TextMessageService) DeleteConversation(ctx context.Context, peer, moduleID string) error {
+	db := scopeMessagesByModule(s.repo.GetDB(ctx), moduleID)
 
 	// 删除条件：(type=incoming AND from=peer) OR (type=outgoing AND to=peer)
 	result := db.Where("(type = ? AND \"from\" = ?) OR (type = ? AND \"to\" = ?)",

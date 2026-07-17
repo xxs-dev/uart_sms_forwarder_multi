@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {MoreVertical, RefreshCw, Search, Send, Trash2, User, X} from 'lucide-react';
 import {toast} from 'sonner';
 import {clearMessages, getConversations, getConversationMessages, deleteConversation, deleteMessage} from '../api/messages';
-import {sendSMS} from '../api/serial';
+import {getModules, sendSMS} from '../api/serial';
 import {Input} from '@/components/ui/input';
 import {Button} from '@/components/ui/button';
 import {
@@ -24,6 +24,7 @@ export default function Messages() {
     const [inputText, setInputText] = useState('');
     // 搜索关键词
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedModuleId, setSelectedModuleId] = useState('');
 
     // 根据手机号生成头像颜色
     const getAvatarColor = (phoneNumber: string) => {
@@ -42,27 +43,43 @@ export default function Messages() {
         return colors[sum % colors.length];
     };
 
+    const {data: modules = []} = useQuery({
+        queryKey: ['serialModules'],
+        queryFn: getModules,
+        refetchInterval: 10000,
+    });
+
+    const defaultModule = modules.find((module) => module.default && !module.disabled);
+    const firstEnabledModule = modules.find((module) => !module.disabled);
+    const activeModuleId = selectedModuleId || (defaultModule || firstEnabledModule || modules[0])?.id || '';
+    const selectedModule = modules.find((module) => module.id === activeModuleId);
+
     // 使用新的会话列表 API
     const {data: conversations = [], isLoading, refetch} = useQuery<Conversation[]>({
-        queryKey: ['conversations'],
-        queryFn: getConversations,
+        queryKey: ['conversations', activeModuleId],
+        queryFn: () => getConversations(activeModuleId),
+        enabled: !!activeModuleId,
         refetchInterval: 5000, // 每 5 秒自动刷新
     });
 
+    const activePeer = selectedPeer && conversations.some((conversation) => conversation.peer === selectedPeer)
+        ? selectedPeer
+        : conversations[0]?.peer || null;
+
     // 获取指定会话的所有消息
     const {data: currentMessages = []} = useQuery<TextMessage[]>({
-        queryKey: ['conversation-messages', selectedPeer],
+        queryKey: ['conversation-messages', activeModuleId, activePeer],
         queryFn: () => {
-            if (!selectedPeer) return Promise.resolve([]);
-            return getConversationMessages(selectedPeer);
+            if (!activePeer) return Promise.resolve([]);
+            return getConversationMessages(activePeer, activeModuleId);
         },
-        enabled: !!selectedPeer,
+        enabled: !!activePeer && !!activeModuleId,
         refetchInterval: 5000,
     });
 
     // 发送短信 Mutation
     const sendSMSMutation = useMutation({
-        mutationFn: (data: { to: string; content: string }) => sendSMS(data),
+        mutationFn: (data: { to: string; content: string }) => sendSMS(data, activeModuleId),
         onSuccess: () => {
             setInputText('');
             // 刷新会话列表和当前会话消息
@@ -77,7 +94,7 @@ export default function Messages() {
 
     // 清空所有短信
     const clearMutation = useMutation({
-        mutationFn: clearMessages,
+        mutationFn: () => clearMessages(activeModuleId),
         onSuccess: () => {
             toast.success('清空成功');
             setSelectedPeer(null);
@@ -92,11 +109,11 @@ export default function Messages() {
 
     // 删除整个会话
     const deleteConversationMutation = useMutation({
-        mutationFn: (peer: string) => deleteConversation(peer),
+        mutationFn: (peer: string) => deleteConversation(peer, activeModuleId),
         onSuccess: (_, peer) => {
             toast.success('会话已删除');
             // 如果删除的是当前选中的会话，清除选中状态
-            if (selectedPeer === peer) {
+            if (activePeer === peer) {
                 setSelectedPeer(null);
             }
             queryClient.invalidateQueries({queryKey: ['conversations']});
@@ -121,20 +138,13 @@ export default function Messages() {
         },
     });
 
-    // 自动选择第一个会话
-    useEffect(() => {
-        if (!selectedPeer && conversations.length > 0) {
-            setSelectedPeer(conversations[0].peer);
-        }
-    }, [conversations, selectedPeer]);
-
     // 自动滚动到底部
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({behavior: "smooth"});
-    }, [selectedPeer, currentMessages]);
+    }, [activePeer, currentMessages]);
 
     // 获取当前选中的会话信息
-    const activeConversation = conversations.find(c => c.peer === selectedPeer);
+    const activeConversation = conversations.find(c => c.peer === activePeer);
 
     // 过滤会话列表
     const filteredConversations = conversations.filter(conv =>
@@ -144,22 +154,26 @@ export default function Messages() {
 
     const handleSendSMS = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedPeer || !inputText.trim()) {
+        if (!activePeer || !inputText.trim()) {
             toast.warning('请输入短信内容');
             return;
         }
-        sendSMSMutation.mutate({to: selectedPeer, content: inputText});
+        if (selectedModule?.disabled) {
+            toast.warning('当前模块已禁用');
+            return;
+        }
+        sendSMSMutation.mutate({to: activePeer, content: inputText});
     };
 
     const handleClear = () => {
-        if (!confirm('确定要清空所有短信吗？此操作不可恢复！')) return;
+        if (!confirm(`确定要清空 ${selectedModule?.name || '当前模块'} 的所有短信吗？此操作不可恢复！`)) return;
         clearMutation.mutate();
     };
 
     const handleDeleteConversation = () => {
-        if (!selectedPeer) return;
-        if (!confirm(`确定要删除与 ${selectedPeer} 的所有消息吗？此操作不可恢复！`)) return;
-        deleteConversationMutation.mutate(selectedPeer);
+        if (!activePeer) return;
+        if (!confirm(`确定要删除 ${selectedModule?.name || '当前模块'} 与 ${activePeer} 的所有消息吗？此操作不可恢复！`)) return;
+        deleteConversationMutation.mutate(activePeer);
     };
 
     const handleDeleteMessage = (messageId: string, e: React.MouseEvent) => {
@@ -216,6 +230,20 @@ export default function Messages() {
                     消息中心
                 </h1>
                 <div className="flex gap-2">
+                    <select
+                        value={activeModuleId}
+                        onChange={(event) => {
+                            setSelectedModuleId(event.target.value);
+                            setSelectedPeer(null);
+                        }}
+                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                        {modules.map((module) => (
+                            <option key={module.id} value={module.id}>
+                                {module.name}{module.default ? '（默认）' : ''}{module.disabled ? '（禁用）' : ''}
+                            </option>
+                        ))}
+                    </select>
                     <Button
                         onClick={() => refetch()}
                         variant="outline"
@@ -227,6 +255,7 @@ export default function Messages() {
                     </Button>
                     <Button
                         onClick={handleClear}
+                        disabled={!activeModuleId}
                         variant="outline"
                         size="sm"
                         className="text-red-600 hover:bg-red-50 hover:border-red-300"
@@ -242,7 +271,7 @@ export default function Messages() {
                 className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden h-[calc(100%-4rem)] flex">
                 {/* 左侧：会话列表 */}
                 <div className={`${
-                    selectedPeer ? 'hidden md:flex' : 'flex'
+                    activePeer ? 'hidden md:flex' : 'flex'
                 } w-full md:w-80 border-r border-gray-200 bg-white flex-col`}>
                     {/* 搜索框 */}
                     <div className="p-4 border-b border-gray-100">
@@ -271,7 +300,7 @@ export default function Messages() {
                                     key={conv.peer}
                                     onClick={() => setSelectedPeer(conv.peer)}
                                     className={`p-4 cursor-pointer transition-all border-l-2 hover:bg-gray-50 ${
-                                        selectedPeer === conv.peer
+                                        activePeer === conv.peer
                                             ? 'bg-blue-50/50 border-blue-500'
                                             : 'border-transparent'
                                     }`}
@@ -283,7 +312,7 @@ export default function Messages() {
                                                 {conv.peer.slice(-2)}
                                             </div>
                                             <span className={`text-sm font-semibold ${
-                                                selectedPeer === conv.peer ? 'text-gray-900' : 'text-gray-700'
+                                                 activePeer === conv.peer ? 'text-gray-900' : 'text-gray-700'
                                             }`}>
                                                 {conv.peer}
                                             </span>
@@ -304,12 +333,12 @@ export default function Messages() {
 
                 {/* 右侧：聊天区域 */}
                 <div className={`${
-                    selectedPeer ? 'flex' : 'hidden md:flex'
+                    activePeer ? 'flex' : 'hidden md:flex'
                 } flex-1 flex-col bg-gray-50/30`}>
                     {/* 聊天头部 */}
                     <div
                         className="h-16 border-b border-gray-200 flex items-center justify-between px-4 md:px-6 bg-white">
-                        {selectedPeer ? (
+                        {activePeer ? (
                             <>
                                 <div className="flex items-center space-x-3">
                                     {/* 移动端返回按钮 */}
@@ -325,11 +354,11 @@ export default function Messages() {
                                         </svg>
                                     </Button>
                                     <div
-                                        className={`w-10 h-10 rounded-full bg-gradient-to-br ${getAvatarColor(selectedPeer)} flex items-center justify-center text-white font-bold shadow-sm`}>
-                                        {selectedPeer.slice(-2)}
+                                        className={`w-10 h-10 rounded-full bg-gradient-to-br ${getAvatarColor(activePeer)} flex items-center justify-center text-white font-bold shadow-sm`}>
+                                        {activePeer.slice(-2)}
                                     </div>
                                     <div>
-                                        <h3 className="text-sm font-bold text-gray-900">{selectedPeer}</h3>
+                                        <h3 className="text-sm font-bold text-gray-900">{activePeer}</h3>
                                         <span className="text-xs text-gray-500">
                                             共 {activeConversation?.messageCount || 0} 条消息
                                         </span>
@@ -363,7 +392,7 @@ export default function Messages() {
 
                     {/* 消息列表 */}
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                        {selectedPeer && currentMessages.length > 0 ? (
+                        {activePeer && currentMessages.length > 0 ? (
                             <>
                                 {currentMessages.map((msg) => (
                                     <div
@@ -418,13 +447,13 @@ export default function Messages() {
                                 type="text"
                                 value={inputText}
                                 onChange={(e) => setInputText(e.target.value)}
-                                placeholder={selectedPeer ? "输入消息内容..." : "请先选择联系人"}
-                                disabled={!selectedPeer || sendSMSMutation.isPending}
+                                placeholder={activePeer ? "输入消息内容..." : "请先选择联系人"}
+                                disabled={!activePeer || sendSMSMutation.isPending || selectedModule?.disabled}
                                 className="flex-1 bg-gray-50 border-gray-200 focus:bg-white focus:border-blue-500 h-10"
                             />
                             <Button
                                 type="submit"
-                                disabled={!selectedPeer || !inputText.trim() || sendSMSMutation.isPending}
+                                disabled={!activePeer || !inputText.trim() || sendSMSMutation.isPending || selectedModule?.disabled}
                                 className="h-10 px-6 bg-blue-600 hover:bg-blue-700 shadow-sm"
                             >
                                 {sendSMSMutation.isPending ? (

@@ -1,5 +1,5 @@
-import {useState} from 'react';
-import {Activity, RotateCcw, Send, Signal, Wifi} from 'lucide-react';
+import {useEffect, useState} from 'react';
+import {Activity, RotateCcw, Send, Signal, Smartphone, Wifi} from 'lucide-react';
 import {toast} from 'sonner';
 import {useMutation, useQuery} from '@tanstack/react-query';
 import * as serialApi from '../api/serial';
@@ -13,12 +13,31 @@ import {formatUptime} from "@/utils/utils.ts";
 export default function SerialControl() {
     const [to, setTo] = useState('');
     const [content, setContent] = useState('');
+    const [selectedModuleId, setSelectedModuleId] = useState('');
+
+    const {data: modules = []} = useQuery({
+        queryKey: ['serialModules'],
+        queryFn: serialApi.getModules,
+        refetchInterval: 10000,
+    });
+
+    useEffect(() => {
+        if (selectedModuleId || modules.length === 0) {
+            return;
+        }
+        const defaultModule = modules.find((module) => module.default && !module.disabled);
+        const firstEnabledModule = modules.find((module) => !module.disabled);
+        setSelectedModuleId((defaultModule || firstEnabledModule || modules[0])?.id || '');
+    }, [modules, selectedModuleId]);
+
+    const selectedModule = modules.find((module) => module.id === selectedModuleId);
+    const activeModuleId = selectedModuleId || undefined;
 
     // 获取设备状态（包含移动网络信息）- 每 30 秒自动刷新
     const {data: deviceStatus, isFetching, refetch: refetchStatus} = useQuery({
-        queryKey: ['deviceStatus'],
+        queryKey: ['deviceStatus', activeModuleId],
         queryFn: async () => {
-            const res = await serialApi.getStatus();
+            const res = await serialApi.getStatus(activeModuleId);
             return res as DeviceStatus;
         },
         refetchInterval: 10000, // 每 10 秒自动刷新
@@ -26,7 +45,7 @@ export default function SerialControl() {
 
     // 发送短信 Mutation
     const sendSMSMutation = useMutation({
-        mutationFn: (data: { to: string; content: string }) => serialApi.sendSMS(data),
+        mutationFn: (data: { to: string; content: string }) => serialApi.sendSMS(data, activeModuleId),
         onSuccess: () => {
             toast.success('短信下发成功，等待确认...');
             setTo('');
@@ -40,7 +59,7 @@ export default function SerialControl() {
 
     // 设置飞行模式 Mutation
     const setFlymodeMutation = useMutation({
-        mutationFn: (enabled: boolean) => serialApi.setFlymode(enabled),
+        mutationFn: (enabled: boolean) => serialApi.setFlymode(enabled, activeModuleId),
         onSuccess: () => {
             toast.success('设置成功');
             // 刷新设备状态
@@ -54,7 +73,7 @@ export default function SerialControl() {
 
     // 重启模块 Mutation
     const rebootMcuMutation = useMutation({
-        mutationFn: () => serialApi.rebootMcu(),
+        mutationFn: () => serialApi.rebootMcu(activeModuleId),
         onSuccess: () => {
             toast.success('模块重启命令已发送');
             refetchStatus();
@@ -71,6 +90,10 @@ export default function SerialControl() {
             toast.warning('请输入手机号和短信内容');
             return;
         }
+        if (selectedModule?.disabled) {
+            toast.warning('当前模块已禁用');
+            return;
+        }
         sendSMSMutation.mutate({to, content});
     };
 
@@ -80,8 +103,62 @@ export default function SerialControl() {
     return (
         <div className="flex flex-col overflow-hidden">
             {/* 顶部标题 */}
-            <div className="mb-6">
+            <div className="mb-4">
                 <h1 className="text-2xl font-bold text-gray-900">串口控制</h1>
+            </div>
+
+            <div className="mb-4 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="flex items-center gap-2 text-base">
+                            <Smartphone className="w-4 h-4 text-blue-600"/>
+                            短信模块
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <select
+                            value={selectedModuleId}
+                            onChange={(event) => setSelectedModuleId(event.target.value)}
+                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                            {modules.map((module) => (
+                                <option key={module.id} value={module.id}>
+                                    {module.name}{module.default ? '（默认）' : ''}{module.disabled ? '（禁用）' : ''}
+                                </option>
+                            ))}
+                        </select>
+                        <div className="mt-2 text-xs text-gray-500 font-mono break-all">
+                            {selectedModule?.port || deviceStatus?.port_name || '自动检测串口'}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {modules.map((module) => {
+                        const online = module.status?.connected;
+                        return (
+                            <button
+                                key={module.id}
+                                type="button"
+                                onClick={() => setSelectedModuleId(module.id)}
+                                className={`text-left rounded-lg border bg-white p-3 transition-colors ${
+                                    selectedModuleId === module.id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+                                }`}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-sm font-medium text-gray-900 truncate">{module.name}</div>
+                                    <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-500' : module.disabled ? 'bg-gray-300' : 'bg-red-500'}`}/>
+                                </div>
+                                <div className="mt-1 text-xs text-gray-500 truncate">
+                                    {module.status?.port_name || module.port || '自动检测'}
+                                </div>
+                                <div className="mt-2 text-xs text-gray-600">
+                                    {module.disabled ? '已禁用' : online ? '在线' : '离线'}
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
             </div>
 
             {/* 主内容区 - 三列布局 */}
@@ -218,7 +295,7 @@ export default function SerialControl() {
                             </div>
                             <Button
                                 type="submit"
-                                disabled={sendSMSMutation.isPending}
+                                disabled={sendSMSMutation.isPending || selectedModule?.disabled}
                                 className="w-full bg-green-600 hover:bg-green-700 h-9"
                             >
                                 <Send className="w-3.5 h-3.5 mr-2"/>
@@ -278,7 +355,7 @@ export default function SerialControl() {
                                     <div className="flex justify-between items-center pb-2 border-b">
                                         <span className="text-xs text-gray-500">开机时长</span>
                                         <span className="text-sm font-medium">
-                                            {formatUptime(mobile.uptime)}
+                                            {formatUptime(mobile?.uptime || 0)}
                                         </span>
                                     </div>
                                     <div className="flex justify-between items-center pb-2 border-b">

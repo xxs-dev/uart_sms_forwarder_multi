@@ -14,6 +14,7 @@ func (s *SerialService) initMessageHandlers() {
 		"phone_number_response":     s.handlePhoneNumberResponse,
 		"cmd_response":              s.handleCommandResponse,
 		"sms_send_result":           s.handleSMSSendResult,
+		"traffic_result":            s.handleTrafficResult,
 		"sim_event":                 s.handleSIMEvent,
 		"warning":                   s.handleWarningMessage,
 		"error":                     s.handleErrorMessage,

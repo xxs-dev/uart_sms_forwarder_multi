@@ -1,6 +1,7 @@
 // 短信记录
 export interface TextMessage {
     id: string;
+    moduleId: string;
     from: string;
     to: string;
     content: string;
@@ -56,6 +57,8 @@ export interface MobileInfo {
 
 // 设备状态响应（来自 Lua 脚本的 status_response）
 export interface DeviceStatus {
+    module_id?: string;           // 模块 ID
+    module_name?: string;         // 模块名称
     type: string;                // 消息类型: "status_response"
     timestamp: number;           // 时间戳
     mem_kb: number;              // 内存使用 (KB)
@@ -64,6 +67,16 @@ export interface DeviceStatus {
     port_name: string;           // 串口名称
     connected: boolean;          // 串口连接状态
     version: string;             // Lua 版本
+}
+
+export interface SerialModule {
+    id: string;
+    name: string;
+    port: string;
+    default: boolean;
+    disabled: boolean;
+    status?: DeviceStatus;
+    status_error?: string;
 }
 
 // 手机号码响应

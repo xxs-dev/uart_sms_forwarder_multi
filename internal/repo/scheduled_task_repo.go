@@ -39,3 +39,23 @@ func (r *ScheduledTaskRepo) UpdateLastRunStatusByMsgId(ctx context.Context, msgI
 		Where("last_msg_id = ?", msgId).
 		Update("last_run_status", status).Error
 }
+
+func (r *ScheduledTaskRepo) BackfillDefaults(ctx context.Context, moduleID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.ScheduledTask{}).
+			Where("task_type = '' OR task_type IS NULL").
+			Update("task_type", models.ScheduledTaskTypeSMS).Error; err != nil {
+			return err
+		}
+		if moduleID != "" {
+			if err := tx.Model(&models.ScheduledTask{}).
+				Where("module_id = '' OR module_id IS NULL").
+				Update("module_id", moduleID).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&models.ScheduledTask{}).
+			Where("traffic_kb <= 0 OR traffic_kb IS NULL").
+			Update("traffic_kb", 5).Error
+	})
+}

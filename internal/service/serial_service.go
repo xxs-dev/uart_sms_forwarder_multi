@@ -36,12 +36,16 @@ type ScheduledTaskStatusUpdater func(ctx context.Context, msgID string, status m
 type SerialService struct {
 	logger                     *zap.Logger
 	config                     config.SerialConfig
+	moduleID                   string
+	moduleName                 string
 	port                       serial.Port
 	textMsgService             *TextMessageService
 	notifier                   *Notifier
 	propertyService            *PropertyService
 	handlers                   map[string]messageHandler
 	scheduledTaskStatusUpdater ScheduledTaskStatusUpdater
+	trafficMu                  sync.Mutex
+	pendingTraffic             map[string]chan TrafficResult
 	wg                         sync.WaitGroup
 	// 设备信息缓存
 	deviceCache cache.Cache[string, *StatusData]
@@ -65,13 +69,36 @@ func NewSerialService(
 	service := &SerialService{
 		logger:          logger,
 		config:          config,
+		moduleID:        "default",
+		moduleName:      "默认模块",
 		textMsgService:  textMsgService,
 		notifier:        notifier,
 		propertyService: propertyService,
 		deviceCache:     cache.New[string, *StatusData](CacheTTL),
+		pendingTraffic:  make(map[string]chan TrafficResult),
 	}
 	service.initMessageHandlers()
 	return service
+}
+
+func (s *SerialService) SetModuleInfo(id, name string) {
+	if id == "" {
+		id = "default"
+	}
+	if name == "" {
+		name = id
+	}
+	s.moduleID = id
+	s.moduleName = name
+	s.logger = s.logger.With(zap.String("module_id", id), zap.String("module_name", name))
+}
+
+func (s *SerialService) ModuleID() string {
+	return s.moduleID
+}
+
+func (s *SerialService) ModuleName() string {
+	return s.moduleName
 }
 
 func (s *SerialService) SetScheduledTaskStatusUpdater(updater ScheduledTaskStatusUpdater) {
@@ -129,6 +156,14 @@ func (s *SerialService) getConnectionInfo() (portName string, connected bool) {
 
 // runOnce 执行一次连接尝试
 func (s *SerialService) runOnce(resetBackoff func()) error {
+	// 如果显式配置了串口路径，直接使用它。Docker/LXC 中常把设备映射成
+	// /dev/ttySMS1 这类稳定别名，此时 serial.GetPortsList 可能不会列出该别名。
+	if s.config.Port != "" {
+		selectedPort := s.config.Port
+		s.logger.Info("使用配置的串口", zap.String("port", selectedPort))
+		return s.connectAndServe(selectedPort, resetBackoff)
+	}
+
 	// 获取串口列表
 	ports, err := serial.GetPortsList()
 	if err != nil {
@@ -141,22 +176,18 @@ func (s *SerialService) runOnce(resetBackoff func()) error {
 
 	s.logger.Debug("发现可用串口", zap.Strings("ports", ports))
 
-	// 确定使用的串口
-	var selectedPort string
-	if s.config.Port != "" {
-		// 使用配置的串口
-		selectedPort = s.config.Port
-		s.logger.Info("使用配置的串口", zap.String("port", selectedPort))
-	} else {
-		// 自动检测
-		s.logger.Info("开始自动检测串口...")
-		selectedPort, err = s.autoDetectPort(ports)
-		if err != nil {
-			return fmt.Errorf("自动检测串口失败: %w", err)
-		}
-		s.logger.Info("自动检测到可用串口", zap.String("port", selectedPort))
+	// 自动检测
+	s.logger.Info("开始自动检测串口...")
+	selectedPort, err := s.autoDetectPort(ports)
+	if err != nil {
+		return fmt.Errorf("自动检测串口失败: %w", err)
 	}
+	s.logger.Info("自动检测到可用串口", zap.String("port", selectedPort))
 
+	return s.connectAndServe(selectedPort, resetBackoff)
+}
+
+func (s *SerialService) connectAndServe(selectedPort string, resetBackoff func()) error {
 	// 连接串口
 	if err := s.connectSerial(selectedPort); err != nil {
 		return fmt.Errorf("连接串口失败: %w", err)
@@ -369,6 +400,7 @@ func (s *SerialService) SendSMS(to, content string) (string, error) {
 	msgID := uuid.NewString()
 	msg := &models.TextMessage{
 		ID:        msgID,
+		ModuleID:  s.moduleID,
 		From:      "", // 发送方是本机
 		To:        to,
 		Content:   content,
@@ -410,6 +442,8 @@ func (s *SerialService) GetStatus() (*StatusData, error) {
 
 	// 从缓存读取
 	if status, ok := s.deviceCache.Get(CacheKeyDeviceStatus); ok {
+		status.ModuleID = s.moduleID
+		status.ModuleName = s.moduleName
 		// 更新串口连接信息
 		status.PortName = portName
 		status.Connected = connected
@@ -421,8 +455,10 @@ func (s *SerialService) GetStatus() (*StatusData, error) {
 
 	// 缓存未命中，但仍然返回连接状态
 	status := &StatusData{
-		PortName:  portName,
-		Connected: connected,
+		ModuleID:   s.moduleID,
+		ModuleName: s.moduleName,
+		PortName:   portName,
+		Connected:  connected,
 	}
 	return status, nil
 }

@@ -29,6 +29,7 @@ type Handlers struct {
 	TextMessage   *handler.TextMessageHandler
 	Serial        *handler.SerialHandler
 	ScheduledTask *handler.ScheduledTaskHandler
+	TrafficRecord *handler.TrafficRecordHandler
 }
 
 func Run(configPath string) {
@@ -68,6 +69,7 @@ func setup(app *orz.App) error {
 	propertyService := service.NewPropertyService(logger, db)
 	notifier := service.NewNotifier(logger)
 	textMessageService := service.NewTextMessageService(logger, textMessageRepo)
+	trafficRecordService := service.NewTrafficRecordService(db)
 
 	// 初始化默认配置
 	ctx := context.Background()
@@ -76,21 +78,34 @@ func setup(app *orz.App) error {
 	}
 
 	// 6. 初始化串口服务
-	serialService := service.NewSerialService(
+	moduleConfigs := service.NormalizeModuleConfigs(appConfig)
+	serialManager := service.NewSerialManager(
 		logger,
-		appConfig.Serial,
+		moduleConfigs,
 		textMessageService,
 		notifier,
 		propertyService,
 	)
+	if defaultService := serialManager.DefaultService(); defaultService != nil {
+		if err := textMessageService.BackfillMissingModuleID(ctx, defaultService.ModuleID()); err != nil {
+			logger.Error("迁移历史短信模块归属失败", zap.Error(err))
+			return err
+		}
+	}
 
 	// 7. 初始化定时任务服务
 	schedulerService := service.NewSchedulerService(
 		logger,
 		db,
-		serialService,
+		serialManager,
+		appConfig.Scheduler.TrafficEndpoint,
+		trafficRecordService,
 	)
-	serialService.SetScheduledTaskStatusUpdater(schedulerService.UpdateLastRunStatusByMsgId)
+	if err := schedulerService.BackfillDefaults(ctx); err != nil {
+		logger.Error("迁移历史定时任务默认值失败", zap.Error(err))
+		return err
+	}
+	serialManager.SetScheduledTaskStatusUpdater(schedulerService.UpdateLastRunStatusByMsgId)
 
 	// 8. 初始化 OIDC 和 Account Service
 	oidcService := service.NewOIDCService(logger, &appConfig)
@@ -100,8 +115,9 @@ func setup(app *orz.App) error {
 	authHandler := handler.NewAuthHandler(logger, accountService)
 	propertyHandler := handler.NewPropertyHandler(logger, propertyService, notifier)
 	textMessageHandler := handler.NewTextMessageHandler(logger, textMessageService, textMessageRepo)
-	serialHandler := handler.NewSerialHandler(logger, serialService)
+	serialHandler := handler.NewSerialHandler(logger, serialManager)
 	scheduledTaskHandler := handler.NewScheduledTaskHandler(logger, schedulerService)
+	trafficRecordHandler := handler.NewTrafficRecordHandler(logger, trafficRecordService)
 
 	handlers := &Handlers{
 		Auth:          authHandler,
@@ -109,6 +125,7 @@ func setup(app *orz.App) error {
 		TextMessage:   textMessageHandler,
 		Serial:        serialHandler,
 		ScheduledTask: scheduledTaskHandler,
+		TrafficRecord: trafficRecordHandler,
 	}
 
 	// 10. 设置 API 路由
@@ -117,7 +134,7 @@ func setup(app *orz.App) error {
 	// 11. 启动后台服务
 	background := context.Background()
 	// 启动串口服务
-	go serialService.Start()
+	serialManager.Start()
 
 	// 启动定时任务服务
 	if err := schedulerService.Start(background); err != nil {
@@ -140,6 +157,9 @@ func setDefaultConfig(appConfig *config.AppConfig, logger *zap.Logger) {
 	if appConfig.JWT.ExpiresHours == 0 {
 		appConfig.JWT.ExpiresHours = 168 // 7天
 	}
+	if appConfig.Scheduler.TrafficEndpoint == "" {
+		logger.Warn("未配置流量保活地址，流量任务将无法执行")
+	}
 }
 
 // autoMigrate 数据库迁移
@@ -148,6 +168,7 @@ func autoMigrate(db *gorm.DB) error {
 		&models.Property{},
 		&models.TextMessage{},
 		&models.ScheduledTask{},
+		&models.TrafficRecord{},
 	)
 }
 
@@ -209,6 +230,13 @@ func setupApi(app *orz.App, handlers *Handlers, appConfig *config.AppConfig, log
 	api.POST("/serial/flymode", handlers.Serial.SetFlymode)
 	api.POST("/serial/reboot", handlers.Serial.RebootMcu)
 
+	// Multi-module Serial API
+	api.GET("/modules", handlers.Serial.ListModules)
+	api.POST("/modules/:moduleId/sms", handlers.Serial.SendSMS)
+	api.GET("/modules/:moduleId/status", handlers.Serial.GetStatus)
+	api.POST("/modules/:moduleId/flymode", handlers.Serial.SetFlymode)
+	api.POST("/modules/:moduleId/reboot", handlers.Serial.RebootMcu)
+
 	// ScheduledTask API (RESTful)
 	api.GET("/scheduled-tasks", handlers.ScheduledTask.List)
 	api.GET("/scheduled-tasks/:id", handlers.ScheduledTask.Get)
@@ -216,6 +244,9 @@ func setupApi(app *orz.App, handlers *Handlers, appConfig *config.AppConfig, log
 	api.PUT("/scheduled-tasks/:id", handlers.ScheduledTask.Update)
 	api.DELETE("/scheduled-tasks/:id", handlers.ScheduledTask.Delete)
 	api.POST("/scheduled-tasks/:id/trigger", handlers.ScheduledTask.Trigger)
+
+	// TrafficRecord API
+	api.GET("/traffic-records", handlers.TrafficRecord.List)
 
 	// 健康检查接口（无需认证）
 	e.GET("/health", func(c echo.Context) error {

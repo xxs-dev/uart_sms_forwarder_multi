@@ -49,7 +49,7 @@ func (h *TextMessageHandler) Delete(c echo.Context) error {
 // Clear 清空所有短信
 // DELETE /api/messages
 func (h *TextMessageHandler) Clear(c echo.Context) error {
-	if err := h.service.Clear(c.Request().Context()); err != nil {
+	if err := h.service.Clear(c.Request().Context(), c.QueryParam("moduleId")); err != nil {
 		h.logger.Error("清空短信失败", zap.Error(err))
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "清空失败",
@@ -78,7 +78,7 @@ func (h *TextMessageHandler) GetStats(c echo.Context) error {
 // GetConversations 获取会话列表
 // GET /api/messages/conversations
 func (h *TextMessageHandler) GetConversations(c echo.Context) error {
-	conversations, err := h.service.GetConversations(c.Request().Context())
+	conversations, err := h.service.GetConversations(c.Request().Context(), c.QueryParam("moduleId"))
 	if err != nil {
 		h.logger.Error("获取会话列表失败", zap.Error(err))
 		return c.JSON(http.StatusInternalServerError, map[string]string{
@@ -111,7 +111,7 @@ func (h *TextMessageHandler) GetConversationMessages(c echo.Context) error {
 		zap.String("peer_raw", peer),
 		zap.String("peer_decoded", decodedPeer))
 
-	messages, err := h.service.GetConversationMessages(c.Request().Context(), decodedPeer)
+	messages, err := h.service.GetConversationMessages(c.Request().Context(), decodedPeer, c.QueryParam("moduleId"))
 	if err != nil {
 		h.logger.Error("获取会话消息失败", zap.Error(err), zap.String("peer", decodedPeer))
 		return c.JSON(http.StatusInternalServerError, map[string]string{
@@ -144,7 +144,7 @@ func (h *TextMessageHandler) DeleteConversation(c echo.Context) error {
 		zap.String("peer_raw", peer),
 		zap.String("peer_decoded", decodedPeer))
 
-	if err := h.service.DeleteConversation(c.Request().Context(), decodedPeer); err != nil {
+	if err := h.service.DeleteConversation(c.Request().Context(), decodedPeer, c.QueryParam("moduleId")); err != nil {
 		h.logger.Error("删除会话失败", zap.Error(err), zap.String("peer", decodedPeer))
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "删除会话失败",

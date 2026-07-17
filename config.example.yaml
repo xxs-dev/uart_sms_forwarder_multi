@@ -30,5 +30,18 @@ App:
 
   # 串口配置
   Serial:
-    # 留空则自动检测，建议首次启动后手动指定
+    # 单模块兼容配置。未配置 Modules 时会使用这里的串口。
     Port: ""
+  # 多模块配置。配置后会忽略上面的 Serial.Port，并为每个模块启动独立串口服务。
+  Modules:
+    - ID: "sim1"
+      Name: "短信模块 1"
+      # 建议使用 /dev/serial/by-id/... 固定路径，避免重启后 ttyACM 编号变化。
+      Port: "/dev/serial/by-id/usb-AirM2M_AirM2M_Compo_000000000001-if06"
+    # - ID: "sim2"
+    #   Name: "短信模块 2"
+    #   Port: "/dev/serial/by-id/..."
+    #   Disabled: false
+  Scheduler:
+    # 必填：流量保活任务使用的固定静态文件。建议自建约 4 KB 的 HTTP 文件，减少 TLS 额外流量。
+    TrafficEndpoint: "http://your-server.example/uart-traffic/payload.bin"

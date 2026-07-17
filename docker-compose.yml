@@ -1,7 +1,6 @@
 services:
   uart_sms_forwarder:
-    # 使用最新的镜像，也可以指定具体版本如：dushixiang/uart_sms_forwarder:v1.0.0
-    image: dushixiang/uart_sms_forwarder:latest
+    image: ghcr.io/xxs-dev/uart_sms_forwarder_multi:v1.2.2-multi.1
     container_name: uart_sms_forwarder
     restart: unless-stopped
 
@@ -17,9 +16,10 @@ services:
       # 挂载配置文件（首次运行前需要创建此文件）
       - ./config.yaml:/app/config.yaml
 
-    # 如果需要访问串口设备，取消以下注释并修改设备路径，每个人设备类型不同，USB 设备路径可能不同，建议根据实际情况修改，/dev/ttyUSB0 只是示例
+    # 为每个模块映射稳定串口路径；请按本机 /dev/serial/by-id 的实际结果修改。
     # devices:
-    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    #   - /dev/serial/by-id/usb-module-1:/dev/ttySMS1
+    #   - /dev/serial/by-id/usb-module-2:/dev/ttySMS2
 
     environment:
       - TZ=Asia/Shanghai

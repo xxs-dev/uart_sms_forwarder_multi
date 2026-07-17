@@ -171,11 +171,21 @@ func (h *ScheduledTaskHandler) validateTask(task *models.ScheduledTask) error {
 	if task.IntervalDays <= 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "执行间隔天数必须大于0")
 	}
-	if task.PhoneNumber == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "目标手机号不能为空")
+	if task.TaskType == "" {
+		task.TaskType = models.ScheduledTaskTypeSMS
 	}
-	if task.Content == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "短信内容不能为空")
+	switch task.TaskType {
+	case models.ScheduledTaskTypeSMS:
+		if task.PhoneNumber == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "目标手机号不能为空")
+		}
+		if task.Content == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "短信内容不能为空")
+		}
+	case models.ScheduledTaskTypeTraffic:
+		task.TrafficKB = 5
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "任务类型必须是 sms 或 traffic")
 	}
 	return nil
 }

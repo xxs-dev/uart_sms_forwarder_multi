@@ -50,6 +50,7 @@ func (s *SerialService) handleIncomingSMS(msg *ParsedMessage) {
 	ctx := context.Background()
 	record := &models.TextMessage{
 		ID:        uuid.NewString(),
+		ModuleID:  s.moduleID,
 		From:      sms.From,
 		To:        "", // 接收方是本机
 		Content:   sms.Content,
@@ -128,6 +129,9 @@ func (s *SerialService) handleSMSSendResult(msg *ParsedMessage) {
 	success, _ := msg.Payload["success"].(bool)
 	to, _ := msg.Payload["to"].(string)
 	requestID, _ := msg.Payload["request_id"].(string)
+	failureReason, _ := msg.Payload["error"].(string)
+	deliveryConfirmed, hasDeliveryConfirmation := msg.Payload["delivery_confirmed"].(bool)
+	deliveryStatus, _ := msg.Payload["delivery_status"].(string)
 
 	if requestID == "" {
 		s.logger.Warn("收到短信发送结果但缺少 request_id", zap.Any("msg", msg.Payload))
@@ -140,19 +144,32 @@ func (s *SerialService) handleSMSSendResult(msg *ParsedMessage) {
 	if success {
 		status = models.MessageStatusSent
 		lastRunStatus = models.LastRunStatusSuccess
-		s.logger.Info("短信发送成功",
-			zap.String("to", to),
-			zap.String("request_id", requestID))
+		if hasDeliveryConfirmation && !deliveryConfirmed {
+			s.logger.Info("短信已提交给调制解调器，旧固件不提供最终回执",
+				zap.String("to", to),
+				zap.String("request_id", requestID),
+				zap.String("delivery_status", deliveryStatus))
+		} else {
+			s.logger.Info("短信发送已确认",
+				zap.String("to", to),
+				zap.String("request_id", requestID),
+				zap.String("delivery_status", deliveryStatus))
+		}
 	} else {
 		status = models.MessageStatusFailed
 		lastRunStatus = models.LastRunStatusFailed
 		s.logger.Warn("短信发送失败",
 			zap.String("to", to),
-			zap.String("request_id", requestID))
+			zap.String("request_id", requestID),
+			zap.String("reason", failureReason))
+		reasonSuffix := ""
+		if failureReason != "" {
+			reasonSuffix = fmt.Sprintf("（原因: %s）", failureReason)
+		}
 		go s.sendNotificationMessage(context.Background(), NotificationMessage{
 			Type:      "sms",
 			From:      "UART 短信转发器",
-			Content:   fmt.Sprintf("短信发送失败: %s", to),
+			Content:   fmt.Sprintf("短信发送失败: %s%s", to, reasonSuffix),
 			Timestamp: time.Now().Unix(),
 		})
 	}

@@ -1,6 +1,6 @@
 -- =================================================================================
 -- PROJECT: UART SMS Forwarder
--- DEVICE:  Air780EPV / Air780EHV
+-- DEVICE:  Air780EHV
 -- VERSION: 1.2.2
 -- 协议说明：
 --   上行（MCU -> 模块）：CMD_START:{json}:CMD_END
