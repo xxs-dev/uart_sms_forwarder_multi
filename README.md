@@ -127,7 +127,10 @@ go build -o uart_sms_forwarder ./cmd/serv
 
 推送 `v*` 标签后，GitHub Actions 会生成多平台 Release 包，并构建发布到 GitHub Container Registry 的 amd64/arm64 镜像。
 
-当前验证镜像：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.2.2-multi.1`。
+当前验证镜像：
+
+- Docker Hub：`s121934/uart_sms_forwarder_multi:1.2.2-multi.1`
+- GHCR：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.2.2-multi.1`
 
 ## 数据与升级
 
