@@ -1,6 +1,6 @@
 services:
   uart_sms_forwarder:
-    image: ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.3.0-multi.1
+    image: ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.3.0-multi.2
     container_name: uart_sms_forwarder
     restart: unless-stopped
 

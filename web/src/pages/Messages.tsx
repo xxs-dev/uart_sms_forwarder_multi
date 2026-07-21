@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {MoreVertical, RefreshCw, Search, Send, Trash2, User, X} from 'lucide-react';
+import {AlertTriangle, MoreVertical, RefreshCw, Search, Send, Trash2, User, X} from 'lucide-react';
 import {toast} from 'sonner';
 import {clearMessages, getConversations, getConversationMessages, deleteConversation, deleteMessage} from '../api/messages';
 import {getModules, sendSMS} from '../api/serial';
@@ -409,6 +409,17 @@ export default function Messages() {
                                                 }`}
                                             >
                                                 <p className="break-words">{msg.content}</p>
+                                                {msg.decodeStatus === 'failed' && (
+                                                    <div
+                                                        className="mt-2 flex max-w-full items-start gap-1.5 border-t border-red-200 pt-2 text-xs text-red-700"
+                                                        title={msg.decodeError || 'PDU 解码失败'}
+                                                    >
+                                                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
+                                                        <span className="break-all">
+                                                            PDU 解码失败{msg.decodeError ? `：${msg.decodeError}` : ''}
+                                                        </span>
+                                                    </div>
+                                                )}
                                                 {/* 删除按钮 - 悬停时显示 */}
                                                 <button
                                                     onClick={(e) => handleDeleteMessage(msg.id, e)}

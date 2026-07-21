@@ -20,6 +20,12 @@ type NotificationChannelConfig struct {
 	Config  map[string]interface{} `json:"config"`  // 配置对象
 }
 
+// ModuleIdentity stores user-maintained metadata for a physical SIM module.
+type ModuleIdentity struct {
+	Alias       string `json:"alias"`
+	PhoneNumber string `json:"phoneNumber"`
+}
+
 // 配置格式说明：
 // dingtalk: { "secretKey": "xxx", "signSecret": "xxx" }
 // wecom:    { "secretKey": "xxx" }

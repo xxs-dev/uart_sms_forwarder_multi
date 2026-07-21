@@ -3,8 +3,17 @@ export interface TextMessage {
     id: string;
     moduleId: string;
     from: string;
+    rawFrom?: string;
     to: string;
     content: string;
+    rawContent?: string;
+    contentHex?: string;
+    pduHex?: string;
+    decodeStatus?: 'firmware' | 'decoded' | 'failed';
+    decodeError?: string;
+    alphabet?: 'gsm7' | 'ucs2' | '8bit' | 'unknown';
+    dcs?: number;
+    segmentCount?: number;
     type: 'incoming' | 'outgoing';
     status: 'received' | 'sending' | 'sent' | 'failed';
     timestamp: number;
@@ -51,7 +60,7 @@ export interface MobileInfo {
     csq: number;
     rsrp: number;
     rsrq: number;
-    number: number;
+    number: string;
     uptime: number;              // 开机时长 (毫秒)
 }
 
@@ -76,11 +85,18 @@ export interface DeviceStatus {
 export interface SerialModule {
     id: string;
     name: string;
+    alias: string;
+    phoneNumber: string;
     port: string;
     default: boolean;
     disabled: boolean;
     status?: DeviceStatus;
     status_error?: string;
+}
+
+export interface ModuleIdentity {
+    alias: string;
+    phoneNumber: string;
 }
 
 export interface CallForwardingConfig {

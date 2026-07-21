@@ -40,6 +40,7 @@ type SerialService struct {
 	moduleName                 string
 	port                       serial.Port
 	textMsgService             *TextMessageService
+	smsPDUDecoder              *SMSPDUDecoder
 	notifier                   *Notifier
 	propertyService            *PropertyService
 	callRecords                *CallRecordService
@@ -75,6 +76,7 @@ func NewSerialService(
 		moduleID:              "default",
 		moduleName:            "默认模块",
 		textMsgService:        textMsgService,
+		smsPDUDecoder:         NewSMSPDUDecoder(),
 		notifier:              notifier,
 		propertyService:       propertyService,
 		deviceCache:           cache.New[string, *StatusData](CacheTTL),

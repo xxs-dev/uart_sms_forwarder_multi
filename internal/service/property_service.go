@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/dushixiang/uart_sms_forwarder/internal/models"
@@ -16,6 +17,8 @@ import (
 const (
 	// PropertyIDNotificationChannels 通知渠道配置的固定 ID
 	PropertyIDNotificationChannels = "notification_channels"
+	// PropertyIDModuleIdentities stores manually maintained SIM aliases and numbers.
+	PropertyIDModuleIdentities = "module_identities"
 )
 
 type PropertyService struct {
@@ -23,6 +26,7 @@ type PropertyService struct {
 	logger *zap.Logger
 	// 内存缓存，使用 go-orz/cache，永不过期
 	cache cache.Cache[string, *models.Property]
+	mu    sync.Mutex
 }
 
 func NewPropertyService(logger *zap.Logger, db *gorm.DB) *PropertyService {
@@ -102,6 +106,38 @@ func (s *PropertyService) GetNotificationChannelConfigs(ctx context.Context) ([]
 	return allChannels, nil
 }
 
+func (s *PropertyService) GetModuleIdentities(ctx context.Context) (map[string]models.ModuleIdentity, error) {
+	identities := make(map[string]models.ModuleIdentity)
+	if err := s.GetValue(ctx, PropertyIDModuleIdentities, &identities); err != nil {
+		return nil, fmt.Errorf("获取 SIM 卡资料失败: %w", err)
+	}
+	return identities, nil
+}
+
+func (s *PropertyService) GetModuleIdentity(ctx context.Context, moduleID string) (models.ModuleIdentity, error) {
+	identities, err := s.GetModuleIdentities(ctx)
+	if err != nil {
+		return models.ModuleIdentity{}, err
+	}
+	return identities[moduleID], nil
+}
+
+func (s *PropertyService) SetModuleIdentity(ctx context.Context, moduleID string, identity models.ModuleIdentity) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	identities, err := s.GetModuleIdentities(ctx)
+	if err != nil {
+		return err
+	}
+	if identity.Alias == "" && identity.PhoneNumber == "" {
+		delete(identities, moduleID)
+	} else {
+		identities[moduleID] = identity
+	}
+	return s.Set(ctx, PropertyIDModuleIdentities, "SIM 卡资料", identities)
+}
+
 // defaultPropertyConfig 默认配置项定义
 type defaultPropertyConfig struct {
 	ID    string
@@ -117,6 +153,11 @@ func (s *PropertyService) InitializeDefaultConfigs(ctx context.Context) error {
 			ID:    PropertyIDNotificationChannels,
 			Name:  "通知渠道配置",
 			Value: []models.NotificationChannelConfig{},
+		},
+		{
+			ID:    PropertyIDModuleIdentities,
+			Name:  "SIM 卡资料",
+			Value: map[string]models.ModuleIdentity{},
 		},
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dushixiang/uart_sms_forwarder/internal/models"
@@ -13,10 +14,23 @@ import (
 
 // IncomingSMS 接收的短信消息结构
 type IncomingSMS struct {
-	Timestamp int64  `json:"timestamp"`
-	From      string `json:"from"`
-	Content   string `json:"content"`
-	Type      string `json:"type"`
+	Timestamp  int64               `json:"timestamp"`
+	From       string              `json:"from"`
+	Content    string              `json:"content"`
+	ContentHex string              `json:"content_hex"`
+	PDUHex     string              `json:"pdu_hex"`
+	Metas      IncomingSMSMetadata `json:"metas"`
+	Type       string              `json:"type"`
+}
+
+type IncomingSMSMetadata struct {
+	Reference int `json:"refNum"`
+	Sequence  int `json:"seqNum"`
+	Segments  int `json:"maxNum"`
+	PDULength int `json:"pdu_length"`
+	SMSLength int `json:"sms_length"`
+	DCS       int `json:"dcs"`
+	Alphabet  int `json:"alphabet"`
 }
 
 func (r IncomingSMS) String() string {
@@ -41,22 +55,71 @@ func (s *SerialService) handleIncomingSMS(msg *ParsedMessage) {
 		return
 	}
 
+	rawFrom := sms.From
+	rawContent := sms.Content
+	decodeStatus := models.MessageDecodeStatusFirmware
+	decodeError := ""
+	alphabet := ""
+	dcs := sms.Metas.DCS
+	segmentCount := 1
+	pduHex := strings.TrimSpace(sms.PDUHex)
+	if pduHex != "" {
+		if s.smsPDUDecoder == nil {
+			s.smsPDUDecoder = NewSMSPDUDecoder()
+		}
+		decoded, err := s.smsPDUDecoder.Decode(pduHex)
+		if err != nil {
+			decodeStatus = models.MessageDecodeStatusFailed
+			decodeError = err.Error()
+			s.logger.Error("短信 PDU 解码失败",
+				zap.String("from", sms.From),
+				zap.String("pdu_hex", pduHex),
+				zap.Error(err))
+		} else if !decoded.Complete {
+			s.logger.Info("收到长短信分片，等待其余分片",
+				zap.String("from", sms.From),
+				zap.Int("segment", decoded.Segment),
+				zap.Int("segments", decoded.Segments))
+			return
+		} else {
+			sms.Content = decoded.Content
+			if decoded.From != "" {
+				sms.From = decoded.From
+			}
+			decodeStatus = models.MessageDecodeStatusDecoded
+			alphabet = decoded.Alphabet
+			dcs = decoded.DCS
+			segmentCount = decoded.Segments
+			pduHex = strings.Join(decoded.PDUHexes, "\n")
+		}
+	}
+
 	s.logger.Info("收到新短信",
 		zap.String("from", sms.From),
 		zap.String("content", sms.Content),
+		zap.String("decode_status", string(decodeStatus)),
 		zap.Int64("timestamp", sms.Timestamp))
 
 	// 保存短信记录
 	ctx := context.Background()
 	record := &models.TextMessage{
-		ID:        uuid.NewString(),
-		ModuleID:  s.moduleID,
-		From:      sms.From,
-		To:        "", // 接收方是本机
-		Content:   sms.Content,
-		Type:      models.MessageTypeIncoming,
-		Status:    models.MessageStatusReceived,
-		CreatedAt: time.Now().UnixMilli(),
+		ID:           uuid.NewString(),
+		ModuleID:     s.moduleID,
+		From:         sms.From,
+		RawFrom:      rawFrom,
+		To:           "", // 接收方是本机
+		Content:      sms.Content,
+		RawContent:   rawContent,
+		ContentHex:   sms.ContentHex,
+		PDUHex:       pduHex,
+		DecodeStatus: decodeStatus,
+		DecodeError:  decodeError,
+		Alphabet:     alphabet,
+		DCS:          dcs,
+		SegmentCount: segmentCount,
+		Type:         models.MessageTypeIncoming,
+		Status:       models.MessageStatusReceived,
+		CreatedAt:    time.Now().UnixMilli(),
 	}
 
 	if err := s.textMsgService.Save(ctx, record); err != nil {
@@ -64,7 +127,9 @@ func (s *SerialService) handleIncomingSMS(msg *ParsedMessage) {
 	}
 
 	// 异步发送通知
-	go s.sendNotification(ctx, sms)
+	if s.propertyService != nil && s.notifier != nil {
+		go s.sendNotification(ctx, sms)
+	}
 }
 
 // sendNotification 发送通知
@@ -82,6 +147,23 @@ func (s *SerialService) sendNotification(ctx context.Context, sms IncomingSMS) {
 
 // sendNotificationMessage 发送通用通知消息
 func (s *SerialService) sendNotificationMessage(ctx context.Context, msg NotificationMessage) {
+	msg.ModuleID = s.ModuleID()
+	msg.ModuleName = s.ModuleName()
+	if s.propertyService != nil {
+		identity, identityErr := s.propertyService.GetModuleIdentity(ctx, s.ModuleID())
+		if identityErr != nil {
+			s.logger.Warn("获取 SIM 卡资料失败", zap.Error(identityErr))
+		} else {
+			msg.ModuleAlias = identity.Alias
+			msg.PhoneNumber = identity.PhoneNumber
+		}
+	}
+	if msg.PhoneNumber == "" {
+		if status, statusErr := s.GetStatus(); statusErr == nil && status != nil {
+			msg.PhoneNumber = status.Mobile.Number
+		}
+	}
+
 	// 获取通知渠道配置
 	channels, err := s.propertyService.GetNotificationChannelConfigs(ctx)
 	if err != nil {

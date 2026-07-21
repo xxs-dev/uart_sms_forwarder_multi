@@ -1,20 +1,32 @@
-import {useEffect, useState} from 'react';
-import {Activity, RotateCcw, Send, Signal, Smartphone, Wifi} from 'lucide-react';
+import {useState} from 'react';
+import {Activity, RotateCcw, Save, Send, Signal, Smartphone, Wifi} from 'lucide-react';
 import {toast} from 'sonner';
-import {useMutation, useQuery} from '@tanstack/react-query';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import * as serialApi from '../api/serial';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import {Button} from '@/components/ui/button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
-import type {DeviceStatus} from '@/api/types';
+import type {DeviceStatus, ModuleIdentity, SerialModule} from '@/api/types';
 import {formatUptime} from "@/utils/utils.ts";
 import CallForwardingControl from '@/components/CallForwardingControl';
 
+const moduleSlot = (moduleId: string) => /^sim\d+$/i.test(moduleId) ? moduleId.toUpperCase() : moduleId;
+
+const moduleLabel = (module: SerialModule) => {
+    const slot = moduleSlot(module.id);
+    const name = module.alias || module.name;
+    return name && name.toLowerCase() !== slot.toLowerCase() ? `${slot} · ${name}` : slot;
+};
+
+const emptyIdentity: ModuleIdentity = {alias: '', phoneNumber: ''};
+
 export default function SerialControl() {
+    const queryClient = useQueryClient();
     const [to, setTo] = useState('');
     const [content, setContent] = useState('');
     const [selectedModuleId, setSelectedModuleId] = useState('');
+    const [identityDrafts, setIdentityDrafts] = useState<Record<string, ModuleIdentity>>({});
 
     const {data: modules = []} = useQuery({
         queryKey: ['serialModules'],
@@ -22,17 +34,31 @@ export default function SerialControl() {
         refetchInterval: 10000,
     });
 
-    useEffect(() => {
-        if (selectedModuleId || modules.length === 0) {
-            return;
-        }
-        const defaultModule = modules.find((module) => module.default && !module.disabled);
-        const firstEnabledModule = modules.find((module) => !module.disabled);
-        setSelectedModuleId((defaultModule || firstEnabledModule || modules[0])?.id || '');
-    }, [modules, selectedModuleId]);
 
-    const selectedModule = modules.find((module) => module.id === selectedModuleId);
-    const activeModuleId = selectedModuleId || undefined;
+    const defaultModule = modules.find((module) => module.default && !module.disabled)
+        || modules.find((module) => !module.disabled)
+        || modules[0];
+    const activeModuleId = selectedModuleId || defaultModule?.id || undefined;
+    const selectedModule = modules.find((module) => module.id === activeModuleId);
+
+    const {data: moduleIdentity} = useQuery({
+        queryKey: ['moduleIdentity', activeModuleId],
+        queryFn: () => serialApi.getModuleIdentity(activeModuleId!),
+        enabled: Boolean(activeModuleId),
+        refetchInterval: 10000,
+    });
+
+    const identityForm = activeModuleId
+        ? identityDrafts[activeModuleId] || moduleIdentity || emptyIdentity
+        : emptyIdentity;
+
+    const updateIdentityField = (field: keyof ModuleIdentity, value: string) => {
+        if (!activeModuleId) return;
+        setIdentityDrafts((current) => ({
+            ...current,
+            [activeModuleId]: {...identityForm, [field]: value},
+        }));
+    };
 
     // 获取设备状态（包含移动网络信息）- 每 30 秒自动刷新
     const {data: deviceStatus, isFetching, refetch: refetchStatus} = useQuery({
@@ -85,6 +111,27 @@ export default function SerialControl() {
         },
     });
 
+    const saveIdentityMutation = useMutation({
+        mutationFn: () => serialApi.updateModuleIdentity(activeModuleId!, {
+            alias: identityForm.alias.trim(),
+            phoneNumber: identityForm.phoneNumber.trim(),
+        }),
+        onSuccess: (identity) => {
+            queryClient.setQueryData(['moduleIdentity', activeModuleId], identity);
+            setIdentityDrafts((current) => {
+                const next = {...current};
+                if (activeModuleId) delete next[activeModuleId];
+                return next;
+            });
+            void queryClient.invalidateQueries({queryKey: ['serialModules']});
+            toast.success('SIM 卡资料已保存');
+        },
+        onError: (error) => {
+            console.error('保存 SIM 卡资料失败:', error);
+            toast.error('保存 SIM 卡资料失败');
+        },
+    });
+
     const handleSendSMS = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!to || !content) {
@@ -100,6 +147,7 @@ export default function SerialControl() {
 
     // 从设备状态中获取移动网络信息
     const mobile = deviceStatus?.mobile;
+    const displayedPhoneNumber = selectedModule?.phoneNumber || mobile?.number;
 
     return (
         <div className="flex flex-col overflow-hidden">
@@ -118,23 +166,58 @@ export default function SerialControl() {
                     </CardHeader>
                     <CardContent>
                         <select
-                            value={selectedModuleId}
+                            value={activeModuleId || ''}
                             onChange={(event) => setSelectedModuleId(event.target.value)}
                             className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                         >
                             {modules.map((module) => (
                                 <option key={module.id} value={module.id}>
-                                    {module.name}{module.default ? '（默认）' : ''}{module.disabled ? '（禁用）' : ''}
+                                    {moduleLabel(module)}{module.default ? '（默认）' : ''}{module.disabled ? '（禁用）' : ''}
                                 </option>
                             ))}
                         </select>
                         <div className="mt-2 text-xs text-gray-500 font-mono break-all">
                             {selectedModule?.port || deviceStatus?.port_name || '自动检测串口'}
                         </div>
+                        <div className="mt-4 space-y-3 border-t border-gray-100 pt-3">
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-600">SIM 卡别名</label>
+                                <Input
+                                    value={identityForm.alias}
+                                    onChange={(event) => updateIdentityField('alias', event.target.value)}
+                                    placeholder="例如：英国主卡"
+                                    maxLength={64}
+                                    disabled={!activeModuleId}
+                                    className="h-9"
+                                />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-600">本机手机号</label>
+                                <Input
+                                    type="tel"
+                                    value={identityForm.phoneNumber}
+                                    onChange={(event) => updateIdentityField('phoneNumber', event.target.value)}
+                                    placeholder="例如：+447700900123"
+                                    maxLength={32}
+                                    disabled={!activeModuleId}
+                                    className="h-9 font-mono"
+                                />
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => saveIdentityMutation.mutate()}
+                                disabled={!activeModuleId || saveIdentityMutation.isPending}
+                                className="h-9 w-full"
+                            >
+                                <Save className="mr-2 h-4 w-4"/>
+                                {saveIdentityMutation.isPending ? '保存中...' : '保存 SIM 卡资料'}
+                            </Button>
+                        </div>
                     </CardContent>
                 </Card>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {modules.map((module) => {
                         const online = module.status?.connected;
                         return (
@@ -143,16 +226,19 @@ export default function SerialControl() {
                                 type="button"
                                 onClick={() => setSelectedModuleId(module.id)}
                                 className={`text-left rounded-lg border bg-white p-3 transition-colors ${
-                                    selectedModuleId === module.id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+                                    activeModuleId === module.id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
                                 }`}
                             >
                                 <div className="flex items-center justify-between gap-2">
-                                    <div className="text-sm font-medium text-gray-900 truncate">{module.name}</div>
+                                    <div className="text-sm font-medium text-gray-900 truncate">{moduleLabel(module)}</div>
                                     <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-500' : module.disabled ? 'bg-gray-300' : 'bg-red-500'}`}/>
                                 </div>
                                 <div className="mt-1 text-xs text-gray-500 truncate">
                                     {module.status?.port_name || module.port || '自动检测'}
                                 </div>
+                                {module.phoneNumber && (
+                                    <div className="mt-1 truncate font-mono text-xs text-gray-500">{module.phoneNumber}</div>
+                                )}
                                 <div className="mt-2 text-xs text-gray-600">
                                     {module.disabled ? '已禁用' : online ? '在线' : '离线'}
                                 </div>
@@ -241,11 +327,11 @@ export default function SerialControl() {
                                     <div
                                         className="font-mono text-xs bg-gray-50 p-1.5 rounded break-all">{mobile.imsi}</div>
                                 </div>
-                                {mobile.number && (
+                                {displayedPhoneNumber && (
                                     <div className="pt-1">
                                         <div className="text-xs text-gray-500 mb-1">手机号</div>
                                         <div
-                                            className="font-mono text-xs bg-gray-50 p-1.5 rounded break-all">{mobile.number}</div>
+                                            className="font-mono text-xs bg-gray-50 p-1.5 rounded break-all">{displayedPhoneNumber}</div>
                                     </div>
                                 )}
 
@@ -431,7 +517,7 @@ export default function SerialControl() {
             </div>
 
             <CallForwardingControl
-                key={selectedModuleId}
+                key={activeModuleId}
                 module={selectedModule}
                 deviceStatus={deviceStatus}
             />

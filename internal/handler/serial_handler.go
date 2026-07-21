@@ -2,7 +2,11 @@ package handler
 
 import (
 	"net/http"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/dushixiang/uart_sms_forwarder/internal/models"
 	"github.com/dushixiang/uart_sms_forwarder/internal/service"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
@@ -143,6 +147,45 @@ func (h *SerialHandler) RebootMcu(c echo.Context) error {
 
 func (h *SerialHandler) ListModules(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.serialManager.ListModules(c.Request().Context()))
+}
+
+func (h *SerialHandler) GetModuleIdentity(c echo.Context) error {
+	identity, err := h.serialManager.GetModuleIdentity(c.Request().Context(), c.Param("moduleId"))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, identity)
+}
+
+func (h *SerialHandler) SetModuleIdentity(c echo.Context) error {
+	var identity models.ModuleIdentity
+	if err := c.Bind(&identity); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "请求参数错误"})
+	}
+
+	identity.Alias = strings.TrimSpace(identity.Alias)
+	identity.PhoneNumber = strings.TrimSpace(identity.PhoneNumber)
+	if utf8.RuneCountInString(identity.Alias) > 64 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "别名不能超过 64 个字符"})
+	}
+	if utf8.RuneCountInString(identity.PhoneNumber) > 32 || !validPhoneNumber(identity.PhoneNumber) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "手机号格式不正确"})
+	}
+	if err := h.serialManager.SetModuleIdentity(c.Request().Context(), c.Param("moduleId"), identity); err != nil {
+		h.logger.Error("保存 SIM 卡资料失败", zap.Error(err))
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, identity)
+}
+
+func validPhoneNumber(value string) bool {
+	for _, r := range value {
+		if unicode.IsDigit(r) || strings.ContainsRune("+()- .", r) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (h *SerialHandler) serviceFromContext(c echo.Context) (*service.SerialService, error) {

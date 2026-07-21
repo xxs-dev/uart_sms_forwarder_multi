@@ -5,17 +5,20 @@ import (
 	"fmt"
 
 	"github.com/dushixiang/uart_sms_forwarder/config"
+	"github.com/dushixiang/uart_sms_forwarder/internal/models"
 	"go.uber.org/zap"
 )
 
 type SerialModuleInfo struct {
-	ID        string      `json:"id"`
-	Name      string      `json:"name"`
-	Port      string      `json:"port"`
-	Default   bool        `json:"default"`
-	Disabled  bool        `json:"disabled"`
-	Status    *StatusData `json:"status,omitempty"`
-	StatusErr string      `json:"status_error,omitempty"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Alias       string      `json:"alias"`
+	PhoneNumber string      `json:"phoneNumber"`
+	Port        string      `json:"port"`
+	Default     bool        `json:"default"`
+	Disabled    bool        `json:"disabled"`
+	Status      *StatusData `json:"status,omitempty"`
+	StatusErr   string      `json:"status_error,omitempty"`
 }
 
 type serialModule struct {
@@ -24,10 +27,11 @@ type serialModule struct {
 }
 
 type SerialManager struct {
-	logger    *zap.Logger
-	modules   map[string]*serialModule
-	order     []string
-	defaultID string
+	logger     *zap.Logger
+	modules    map[string]*serialModule
+	order      []string
+	defaultID  string
+	properties *PropertyService
 }
 
 func NormalizeModuleConfigs(appConfig config.AppConfig) []config.ModuleConfig {
@@ -62,8 +66,9 @@ func NewSerialManager(
 	propertyService *PropertyService,
 ) *SerialManager {
 	manager := &SerialManager{
-		logger:  logger,
-		modules: make(map[string]*serialModule),
+		logger:     logger,
+		modules:    make(map[string]*serialModule),
+		properties: propertyService,
 	}
 
 	for _, module := range modules {
@@ -151,18 +156,31 @@ func (m *SerialManager) GetService(moduleID string) (*SerialService, error) {
 }
 
 func (m *SerialManager) ListModules(ctx context.Context) []SerialModuleInfo {
+	identities := make(map[string]models.ModuleIdentity)
+	if m.properties != nil {
+		var err error
+		identities, err = m.properties.GetModuleIdentities(ctx)
+		if err != nil {
+			m.logger.Warn("获取 SIM 卡资料失败", zap.Error(err))
+			identities = make(map[string]models.ModuleIdentity)
+		}
+	}
+
 	result := make([]SerialModuleInfo, 0, len(m.order))
 	for _, id := range m.order {
 		module := m.modules[id]
 		if module == nil {
 			continue
 		}
+		identity := identities[id]
 		info := SerialModuleInfo{
-			ID:       module.config.ID,
-			Name:     module.config.Name,
-			Port:     module.config.Port,
-			Default:  id == m.defaultID,
-			Disabled: module.config.Disabled,
+			ID:          module.config.ID,
+			Name:        module.config.Name,
+			Alias:       identity.Alias,
+			PhoneNumber: identity.PhoneNumber,
+			Port:        module.config.Port,
+			Default:     id == m.defaultID,
+			Disabled:    module.config.Disabled,
 		}
 		if module.service != nil {
 			status, err := module.service.GetStatus()
@@ -170,9 +188,32 @@ func (m *SerialManager) ListModules(ctx context.Context) []SerialModuleInfo {
 				info.StatusErr = err.Error()
 			} else {
 				info.Status = status
+				if info.PhoneNumber == "" {
+					info.PhoneNumber = status.Mobile.Number
+				}
 			}
 		}
 		result = append(result, info)
 	}
 	return result
+}
+
+func (m *SerialManager) GetModuleIdentity(ctx context.Context, moduleID string) (models.ModuleIdentity, error) {
+	if _, ok := m.modules[moduleID]; !ok {
+		return models.ModuleIdentity{}, fmt.Errorf("模块不存在: %s", moduleID)
+	}
+	if m.properties == nil {
+		return models.ModuleIdentity{}, nil
+	}
+	return m.properties.GetModuleIdentity(ctx, moduleID)
+}
+
+func (m *SerialManager) SetModuleIdentity(ctx context.Context, moduleID string, identity models.ModuleIdentity) error {
+	if _, ok := m.modules[moduleID]; !ok {
+		return fmt.Errorf("模块不存在: %s", moduleID)
+	}
+	if m.properties == nil {
+		return fmt.Errorf("SIM 卡资料服务不可用")
+	}
+	return m.properties.SetModuleIdentity(ctx, moduleID, identity)
 }

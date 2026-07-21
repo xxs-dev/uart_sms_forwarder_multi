@@ -1,20 +1,24 @@
 -- =================================================================================
 -- PROJECT: UART SMS Forwarder
 -- DEVICE:  Air780EPV
--- VERSION: 1.3.0
+-- VERSION: 1.4.0
 -- 协议说明：
 --   上行（MCU -> 模块）：CMD_START:{json}:CMD_END
 --   下行（模块 -> MCU）：SMS_START:{json}:SMS_END
 -- =================================================================================
 
 PROJECT = "uart_sms_forwarder"
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 log.info("main", PROJECT, VERSION)
 
 -- 1. 引入必要库
 sys = require("sys")
 sysplus = require("sysplus")
+
+-- V1002's built-in GSM7 concatenation path corrupts some international SMS.
+-- Forward each original PDU segment and reassemble it on the server instead.
+sms.autoLong(false)
 
 -- 2. 全局配置与变量
 -- [注意] 如果接单片机物理引脚，通常是 uart.UART_1；如果是USB调试，用 uart.VUART_0
@@ -563,12 +567,18 @@ sys.subscribe("SMS_INC", function(phone, content, metas)
     if content and content.toHex then
         content_hex = content:toHex()
     end
+    local pdu_hex = ""
+    if metas and type(metas.pdu) == "string" then
+        pdu_hex = metas.pdu
+        metas.pdu = nil
+    end
     local msg = {
         type = "incoming_sms",
         timestamp = os.time(),
         from = phone,
         content = content,
         content_hex = content_hex,
+        pdu_hex = pdu_hex,
         metas = metas
     }
     table.insert(msg_buffer, msg)

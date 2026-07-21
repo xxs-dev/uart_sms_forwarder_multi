@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { SendSMSRequest, SerialModule } from './types';
+import type {ModuleIdentity, SendSMSRequest, SerialModule} from './types';
 
 const modulePath = (moduleId?: string) => {
   return moduleId ? `/modules/${encodeURIComponent(moduleId)}` : '/serial';
@@ -28,5 +28,13 @@ export const setFlymode = (enabled: boolean, moduleId?: string) => {
 // 重启模块
 export const rebootMcu = (moduleId?: string) => {
   return apiClient.post(`${modulePath(moduleId)}/reboot`);
+};
+
+export const getModuleIdentity = (moduleId: string) => {
+  return apiClient.get<ModuleIdentity>(`/modules/${encodeURIComponent(moduleId)}/identity`);
+};
+
+export const updateModuleIdentity = (moduleId: string, identity: ModuleIdentity) => {
+  return apiClient.put<ModuleIdentity>(`/modules/${encodeURIComponent(moduleId)}/identity`, identity);
 };
 

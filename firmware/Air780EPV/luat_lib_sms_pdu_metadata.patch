@@ -1,0 +1,22 @@
+diff --git a/components/sms/luat_lib_sms.c b/components/sms/luat_lib_sms.c
+--- a/components/sms/luat_lib_sms.c
++++ b/components/sms/luat_lib_sms.c
+@@ -140,6 +140,17 @@ static void push_sms_args(lua_State* L, LUAT_SMS_RECV_MSG_T* sms, char* dst, siz
+     lua_pushinteger(L, sms->time.second);
+     lua_setfield(L, -2, "sec");
+     lua_pushinteger(L, sms->time.tz_sign == '+' ? sms->time.tz : - sms->time.tz);
+     lua_setfield(L, -2, "tz");
++
++    // pdu_data is already an ASCII hex string containing SMSC + TPDU.
++    lua_pushstring(L, sms->pdu_data);
++    lua_setfield(L, -2, "pdu");
++    lua_pushinteger(L, sms->pdu_length);
++    lua_setfield(L, -2, "pdu_length");
++    lua_pushinteger(L, sms->sms_length);
++    lua_setfield(L, -2, "sms_length");
++    lua_pushinteger(L, sms->dcs_info.dcs);
++    lua_setfield(L, -2, "dcs");
++    lua_pushinteger(L, sms->dcs_info.alpha_bet);
++    lua_setfield(L, -2, "alphabet");
+-
+ }

@@ -33,34 +33,100 @@ func NewNotifier(logger *zap.Logger) *Notifier {
 
 // NotificationMessage 通用通知消息（支持短信、来电等）
 type NotificationMessage struct {
-	Type      string // "sms" 或 "call"
-	From      string
-	Content   string // 短信内容（来电时为空）
-	Timestamp int64
+	Type        string // "sms" 或 "call"
+	From        string
+	Content     string // 短信内容（来电时为空）
+	Timestamp   int64
+	ModuleID    string
+	ModuleName  string
+	ModuleAlias string
+	PhoneNumber string
 }
 
 func (m NotificationMessage) String() string {
 	timestamp := time.Unix(m.Timestamp, 0)
+	identityLines := make([]string, 0, 2)
+	if label := m.SIMLabel(); label != "" {
+		identityLines = append(identityLines, "SIM卡: "+label)
+	}
+	if m.PhoneNumber != "" {
+		identityLines = append(identityLines, "本机号码: "+m.PhoneNumber)
+	}
+	identity := ""
+	if len(identityLines) > 0 {
+		identity = strings.Join(identityLines, "\n") + "\n"
+	}
 	switch m.Type {
 	case "call":
 		return fmt.Sprintf(`来电通知
 ----
-来电号码: %s
+%s来电号码: %s
 时间: %s
 `,
+			identity,
 			m.From,
 			timestamp.Format(time.DateTime),
 		)
 	default: // "sms"
 		return fmt.Sprintf(`%s
 ----
-来自: %s
+%s来自: %s
 时间: %s
 `,
 			m.Content,
+			identity,
 			m.From,
 			timestamp.Format(time.DateTime),
 		)
+	}
+}
+
+func (m NotificationMessage) SIMLabel() string {
+	moduleID := strings.TrimSpace(m.ModuleID)
+	label := moduleID
+	lowerID := strings.ToLower(moduleID)
+	if strings.HasPrefix(lowerID, "sim") && len(lowerID) > 3 {
+		suffix := lowerID[3:]
+		if _, err := strconv.Atoi(suffix); err == nil {
+			label = "SIM" + suffix
+		}
+	}
+
+	name := strings.TrimSpace(m.ModuleAlias)
+	if name == "" {
+		name = strings.TrimSpace(m.ModuleName)
+	}
+	if label == "" {
+		return name
+	}
+	if name != "" && !strings.EqualFold(name, label) && !strings.EqualFold(name, moduleID) {
+		return fmt.Sprintf("%s（%s）", label, name)
+	}
+	return label
+}
+
+func (m NotificationMessage) templateValue(tag string) (string, bool) {
+	switch tag {
+	case "from":
+		return m.From, true
+	case "content":
+		return m.Content, true
+	case "type":
+		return m.Type, true
+	case "timestamp":
+		return time.Unix(m.Timestamp, 0).Format(time.DateTime), true
+	case "module_id":
+		return m.ModuleID, true
+	case "module_name":
+		return m.ModuleName, true
+	case "module_alias", "sim_alias":
+		return m.ModuleAlias, true
+	case "phone_number", "sim_number":
+		return m.PhoneNumber, true
+	case "sim_label":
+		return m.SIMLabel(), true
+	default:
+		return "", false
 	}
 }
 
@@ -238,19 +304,8 @@ func (n *Notifier) sendCustomWebhook(ctx context.Context, config map[string]inte
 	}
 
 	bodyStr := t.ExecuteFuncString(func(w io.Writer, tag string) (int, error) {
-		var v string
-
-		switch tag {
-		case "from":
-			v = msg.From
-		case "content":
-			v = msg.Content
-		case "type":
-			v = msg.Type
-		case "timestamp":
-			timestamp := time.Unix(msg.Timestamp, 0).Format(time.DateTime)
-			v = timestamp
-		default:
+		v, ok := msg.templateValue(tag)
+		if !ok {
 			return w.Write([]byte("{{" + tag + "}}"))
 		}
 
@@ -492,17 +547,8 @@ func (n *Notifier) sendEmail(ctx context.Context, config map[string]interface{},
 	replaceVars := func(template string) string {
 		t := fasttemplate.New(template, "{{", "}}")
 		return t.ExecuteFuncString(func(w io.Writer, tag string) (int, error) {
-			var v string
-			switch tag {
-			case "from":
-				v = msg.From
-			case "content":
-				v = msg.Content
-			case "type":
-				v = msg.Type
-			case "timestamp":
-				v = time.Unix(msg.Timestamp, 0).Format(time.DateTime)
-			default:
+			v, ok := msg.templateValue(tag)
+			if !ok {
 				return w.Write([]byte("{{" + tag + "}}"))
 			}
 			return w.Write([]byte(v))

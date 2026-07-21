@@ -73,7 +73,7 @@ export default function NotificationChannels() {
         webhookMethod: 'POST',
         webhookContentType: 'application/json; charset=utf-8',
         webhookHeaders: '',
-        webhookBody: '{"from": "{{from}}", "content": "{{content}}", "timestamp": "{{timestamp}}"}',
+        webhookBody: '{"sim": "{{sim_label}}", "simNumber": "{{sim_number}}", "from": "{{from}}", "content": "{{content}}", "timestamp": "{{timestamp}}"}',
         emailEnabled: false,
         emailSmtpHost: '',
         emailSmtpPort: '587',
@@ -144,7 +144,7 @@ export default function NotificationChannels() {
                     newFormValues.webhookUrl = (channel.config?.url as string) || '';
                     newFormValues.webhookMethod = (channel.config?.method as string) || 'POST';
                     newFormValues.webhookContentType = (channel.config?.contentType as string) || 'application/json; charset=utf-8';
-                    newFormValues.webhookBody = (channel.config?.body as string) || '{"from": "{{from}}", "content": "{{content}}", "timestamp": "{{timestamp}}"}';
+                    newFormValues.webhookBody = (channel.config?.body as string) || '{"sim": "{{sim_label}}", "simNumber": "{{sim_number}}", "from": "{{from}}", "content": "{{content}}", "timestamp": "{{timestamp}}"}';
 
                     // 解析 headers 为 JSON 字符串
                     const headers = channel.config?.headers || {};
@@ -673,13 +673,15 @@ export default function NotificationChannels() {
                                 <Textarea
                                     value={formValues.webhookBody}
                                     onChange={(e) => updateField('webhookBody', e.target.value)}
-                                    placeholder='{"from": "{{from}}", "content": "{{content}}", "timestamp": "{{timestamp}}"}'
+                                    placeholder='{"sim": "{{sim_label}}", "simNumber": "{{sim_number}}", "from": "{{from}}", "content": "{{content}}"}'
                                     rows={6}
                                     className="bg-gray-50 border-gray-200 focus:bg-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all font-mono text-xs"
                                 />
                                 <p className="text-xs text-gray-400 mt-1.5">
                                     支持模板变量：<code className="bg-gray-200 px-1 py-0.5 rounded">{'{{from}}'}</code>（发送方）、
                                     <code className="bg-gray-200 px-1 py-0.5 rounded">{'{{content}}'}</code>（短信内容）、
+                                    <code className="bg-gray-200 px-1 py-0.5 rounded">{'{{sim_label}}'}</code>（SIM 标识）、
+                                    <code className="bg-gray-200 px-1 py-0.5 rounded">{'{{sim_number}}'}</code>（本机号码）、
                                     <code className="bg-gray-200 px-1 py-0.5 rounded">{'{{timestamp}}'}</code>（时间戳）
                                 </p>
                             </div>
@@ -711,12 +713,16 @@ export default function NotificationChannels() {
                                     <ul className="list-disc list-inside space-y-1 ml-2">
                                         <li><code className="bg-white px-1.5 py-0.5 rounded border border-blue-200">{'{{from}}'}</code> - 短信发送方手机号</li>
                                         <li><code className="bg-white px-1.5 py-0.5 rounded border border-blue-200">{'{{content}}'}</code> - 短信内容</li>
+                                        <li><code className="bg-white px-1.5 py-0.5 rounded border border-blue-200">{'{{sim_label}}'}</code> - SIM 卡槽位和别名</li>
+                                        <li><code className="bg-white px-1.5 py-0.5 rounded border border-blue-200">{'{{sim_number}}'}</code> - 本机 SIM 手机号</li>
                                         <li><code className="bg-white px-1.5 py-0.5 rounded border border-blue-200">{'{{timestamp}}'}</code> - 接收时间（格式：2006-01-02 15:04:05）</li>
                                     </ul>
                                     <p className="mt-2">示例模板：</p>
                                     <pre
                                         className="bg-white border border-blue-100 rounded p-3 mt-2 overflow-x-auto text-[11px] leading-relaxed">
 {`{
+  "sim": "{{sim_label}}",
+  "simNumber": "{{sim_number}}",
   "from": "{{from}}",
   "content": "{{content}}",
   "timestamp": "{{timestamp}}"
@@ -879,6 +885,7 @@ export default function NotificationChannels() {
                                 <p className="text-xs text-gray-400 mt-1.5">
                                     支持模板变量：<code className="bg-gray-200 px-1 py-0.5 rounded">{'{{from}}'}</code>（发送方）、
                                     <code className="bg-gray-200 px-1 py-0.5 rounded">{'{{content}}'}</code>（短信内容）、
+                                    <code className="bg-gray-200 px-1 py-0.5 rounded">{'{{sim_label}}'}</code>（SIM 标识）、
                                     <code className="bg-gray-200 px-1 py-0.5 rounded">{'{{timestamp}}'}</code>（时间戳）
                                 </p>
                             </div>

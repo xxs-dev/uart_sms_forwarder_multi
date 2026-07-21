@@ -247,6 +247,8 @@ func setupApi(app *orz.App, handlers *Handlers, appConfig *config.AppConfig, log
 	api.GET("/modules/:moduleId/status", handlers.Serial.GetStatus)
 	api.POST("/modules/:moduleId/flymode", handlers.Serial.SetFlymode)
 	api.POST("/modules/:moduleId/reboot", handlers.Serial.RebootMcu)
+	api.GET("/modules/:moduleId/identity", handlers.Serial.GetModuleIdentity)
+	api.PUT("/modules/:moduleId/identity", handlers.Serial.SetModuleIdentity)
 	api.GET("/modules/:moduleId/call-forwarding", handlers.CallForwarding.Get)
 	api.PUT("/modules/:moduleId/call-forwarding", handlers.CallForwarding.Update)
 
