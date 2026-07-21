@@ -41,6 +41,8 @@ import {
 
 type APIError = {response?: {data?: {error?: string}}};
 
+const FIXED_TRAFFIC_KB = 50;
+
 const errorMessage = (error: unknown, fallback: string) =>
     (error as APIError)?.response?.data?.error || fallback;
 
@@ -52,7 +54,7 @@ const emptyForm = (moduleId = ''): ScheduledTaskInput => ({
     moduleId,
     phoneNumber: '',
     content: '',
-    trafficKB: 5,
+    trafficKB: FIXED_TRAFFIC_KB,
 });
 
 const statusDisplay = (status?: LastRunStatus) => {
@@ -148,7 +150,7 @@ export default function ScheduledTasksConfig() {
             moduleId: task.moduleId || defaultModuleId(),
             phoneNumber: task.phoneNumber || '',
             content: task.content || '',
-            trafficKB: 5,
+            trafficKB: FIXED_TRAFFIC_KB,
         });
         setDialogOpen(true);
     };
@@ -237,7 +239,7 @@ export default function ScheduledTasksConfig() {
                                         <div className="flex items-center gap-2 border-y border-gray-100 py-3 text-sm">
                                             <Radio className="h-4 w-4 text-cyan-700"/>
                                             <span className="text-gray-500">目标流量</span>
-                                            <span className="ml-auto font-semibold text-gray-800">约 {task.trafficKB || 5} KB</span>
+                                            <span className="ml-auto font-semibold text-gray-800">约 {task.trafficKB || FIXED_TRAFFIC_KB} KiB</span>
                                         </div>
                                     ) : (
                                         <div className="space-y-2 border-y border-gray-100 py-3 text-sm">
@@ -315,7 +317,7 @@ export default function ScheduledTasksConfig() {
                             {formData.taskType === 'traffic' && (
                                 <div className="space-y-2 text-sm font-medium text-gray-700">
                                     <span>单次流量</span>
-                                    <div className="flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-gray-700">约 5 KB</div>
+                                    <div className="flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-gray-700">约 50 KiB</div>
                                 </div>
                             )}
                         </div>

@@ -183,7 +183,7 @@ func (h *ScheduledTaskHandler) validateTask(task *models.ScheduledTask) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "短信内容不能为空")
 		}
 	case models.ScheduledTaskTypeTraffic:
-		task.TrafficKB = 5
+		task.TrafficKB = models.FixedTrafficKB
 	default:
 		return echo.NewHTTPError(http.StatusBadRequest, "任务类型必须是 sms 或 traffic")
 	}

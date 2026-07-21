@@ -376,9 +376,9 @@ func (s *SchedulerService) normalizeTask(task *models.ScheduledTask) {
 		}
 	}
 	if task.TaskType == models.ScheduledTaskTypeTraffic {
-		task.TrafficKB = 5
+		task.TrafficKB = models.FixedTrafficKB
 	} else if task.TrafficKB <= 0 {
-		task.TrafficKB = 5
+		task.TrafficKB = models.FixedTrafficKB
 	}
 }
 

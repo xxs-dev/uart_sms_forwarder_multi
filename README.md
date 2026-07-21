@@ -2,7 +2,7 @@
 
 基于 [dushixiang/uart_sms_forwarder](https://github.com/dushixiang/uart_sms_forwarder) 扩展的 Air780 系列短信与来电管理平台。本版本增加多模块统一管理、按模块收发短信、SIM 卡资料、通话记录、定时流量保活和可配置的无应答呼叫转移。
 
-> 当前平台发布版：`v1.3.0-multi.2`
+> 当前平台发布版：`v1.3.0-multi.3`
 > Lua 插件版本：Air780EPV `1.4.0`；Air780EHV / 通用脚本 `1.3.0`
 
 ## 已验证环境
@@ -21,6 +21,12 @@
 | 前端 | 桌面端及 390 px 手机端 | 通过，无横向溢出 |
 | 自动测试 | `go test ./...`、`npm run build`、本次改动定向 ESLint | 通过 |
 
+## v1.3.0-multi.3 更新
+
+- 定时流量保活由约 5 KiB 调整为固定 50 KiB，旧流量任务会在平台启动时自动迁移。
+- giffgaff 中国漫游实测 50 KiB 请求可进入账单，单次约 `£0.01`；运营商可能按不同粒度计费，平台不保证固定费用。
+- 页面、数据库记录、配置示例和实际静态文件统一使用 50 KiB，日常任务不再依赖低于计费显示阈值的小流量。
+
 ## v1.3.0-multi.2 更新
 
 - 增加按模块保存的 SIM 卡别名和本机手机号，并在短信、来电、发送失败通知及 Webhook/邮件变量中统一携带。
@@ -28,7 +34,7 @@
 - 增加 Air780EPV 专用的定制 V1002 固件、可复现源码补丁、SHA256 校验值和一次刷写说明；Air780EHV 不需要刷写该固件。
 - 修正多模块页面的默认选择、SIM 资料刷新和模块卡片布局，保持现有数据库和单模块配置兼容。
 
-真实模块使用自建的 4 KB HTTP 静态文件验证：
+真实模块先以 4 KiB 基线文件验证链路，再以 50 KiB 文件验证可见计费：
 
 | 模块 | HTTP | 上行 | 下行 | 合计 | 连接状态 |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -45,7 +51,7 @@
 - 支持按指定模块接收、发送短信和执行串口命令。
 - Air780EPV 支持服务端 PDU 解码和长短信分片重组；解码失败时保留原始数据并在页面显示原因。
 - 支持定时短信任务和定时流量保活任务。
-- 流量任务固定约 5 KB，并记录 HTTP 状态、上行、下行、总流量、连接状态及错误原因。
+- 流量任务固定约 50 KiB，并记录 HTTP 状态、上行、下行、总流量、连接状态及错误原因。
 - 流量历史独立保存在 SQLite 中，删除定时任务不会删除历史记录。
 - 支持来电通知，以及钉钉、企业微信、飞书、自定义 Webhook、邮件和 Telegram 通知。
 - 短信、来电和发送失败通知固定携带 `SIM1/SIM2`、SIM 卡别名和本机号码；未手填号码时自动使用模块上报值。
@@ -134,11 +140,11 @@ App:
 
 ### 3. 准备流量保活文件
 
-建议在自己控制的 HTTP 站点放置一个不可压缩的 4 KB 静态文件：
+建议在自己控制的 HTTP 站点放置一个 50 KiB 静态文件：
 
 ```bash
 mkdir -p /var/www/html/uart-traffic
-dd if=/dev/urandom of=/var/www/html/uart-traffic/payload.bin bs=4096 count=1
+dd if=/dev/urandom of=/var/www/html/uart-traffic/payload.bin bs=1024 count=50
 ```
 
 使用 HTTP 可以减少 TLS 握手流量。该地址必须能被 SIM 卡的移动网络直接访问，并应配置合理的访问限制，避免被公开滥用。
@@ -171,8 +177,8 @@ go build -o uart_sms_forwarder ./cmd/serv
 
 当前验证镜像：
 
-- Docker Hub：`s121934/uart_sms_forwarder_multi:1.3.0-multi.2`
-- GHCR：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.3.0-multi.2`
+- Docker Hub：`s121934/uart_sms_forwarder_multi:1.3.0-multi.3`
+- GHCR：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.3.0-multi.3`
 
 ## 数据与升级
 

@@ -55,7 +55,7 @@ func (r *ScheduledTaskRepo) BackfillDefaults(ctx context.Context, moduleID strin
 			}
 		}
 		return tx.Model(&models.ScheduledTask{}).
-			Where("traffic_kb <= 0 OR traffic_kb IS NULL").
-			Update("traffic_kb", 5).Error
+			Where("traffic_kb <= 0 OR traffic_kb IS NULL OR task_type = ?", models.ScheduledTaskTypeTraffic).
+			Update("traffic_kb", models.FixedTrafficKB).Error
 	})
 }

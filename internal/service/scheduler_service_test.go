@@ -52,8 +52,31 @@ func TestSchedulerBackfillsLegacyTaskDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if task.TaskType != models.ScheduledTaskTypeSMS || task.ModuleID != "sim1" || task.TrafficKB != 5 {
+	if task.TaskType != models.ScheduledTaskTypeSMS || task.ModuleID != "sim1" || task.TrafficKB != models.FixedTrafficKB {
 		t.Fatalf("unexpected defaults: type=%q module=%q trafficKB=%d", task.TaskType, task.ModuleID, task.TrafficKB)
+	}
+}
+
+func TestSchedulerMigratesExistingFiveKBTrafficTask(t *testing.T) {
+	service, db := newSchedulerTestService(t)
+	if err := db.Exec(`INSERT INTO scheduled_tasks
+		(id, name, enabled, interval_days, task_type, module_id, traffic_kb)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, "traffic-5kb", "legacy traffic", true, 90, "traffic", "sim1", 5).Error; err != nil {
+		t.Fatalf("insert traffic task: %v", err)
+	}
+
+	if err := service.BackfillDefaults(context.Background()); err != nil {
+		t.Fatalf("backfill defaults: %v", err)
+	}
+	var trafficKB int
+	if err := db.Model(&models.ScheduledTask{}).
+		Select("traffic_kb").
+		Where("id = ?", "traffic-5kb").
+		Scan(&trafficKB).Error; err != nil {
+		t.Fatalf("read migrated task: %v", err)
+	}
+	if trafficKB != models.FixedTrafficKB {
+		t.Fatalf("trafficKB=%d, want %d", trafficKB, models.FixedTrafficKB)
 	}
 }
 
@@ -65,14 +88,14 @@ func TestSchedulerRejectsUnknownModule(t *testing.T) {
 		IntervalDays: 30,
 		TaskType:     models.ScheduledTaskTypeTraffic,
 		ModuleID:     "sim3",
-		TrafficKB:    5,
+		TrafficKB:    models.FixedTrafficKB,
 	}
 	if err := service.Create(context.Background(), task); err == nil {
 		t.Fatal("expected unknown module error")
 	}
 }
 
-func TestSchedulerUsesFixedFiveKBPayload(t *testing.T) {
+func TestSchedulerUsesFixedFiftyKBPayload(t *testing.T) {
 	service, _ := newSchedulerTestService(t)
 	task := &models.ScheduledTask{
 		Name:         "traffic",
@@ -85,8 +108,8 @@ func TestSchedulerUsesFixedFiveKBPayload(t *testing.T) {
 	if err := service.Create(context.Background(), task); err != nil {
 		t.Fatalf("create traffic task: %v", err)
 	}
-	if task.TrafficKB != 5 {
-		t.Fatalf("trafficKB=%d, want 5", task.TrafficKB)
+	if task.TrafficKB != models.FixedTrafficKB {
+		t.Fatalf("trafficKB=%d, want %d", task.TrafficKB, models.FixedTrafficKB)
 	}
 }
 

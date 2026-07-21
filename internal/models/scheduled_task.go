@@ -11,6 +11,8 @@ const (
 
 	ScheduledTaskTypeSMS     ScheduledTaskType = "sms"
 	ScheduledTaskTypeTraffic ScheduledTaskType = "traffic"
+
+	FixedTrafficKB = 50
 )
 
 // ScheduledTask 定时任务
@@ -23,7 +25,7 @@ type ScheduledTask struct {
 	ModuleID     string            `json:"moduleId"`                              // 执行任务的模块
 	PhoneNumber  string            `json:"phoneNumber"`                           // 目标手机号
 	Content      string            `gorm:"type:text" json:"content"`              // 短信内容
-	TrafficKB    int               `gorm:"default:5" json:"trafficKB"`            // 流量任务的目标流量（KB）
+	TrafficKB    int               `gorm:"default:50" json:"trafficKB"`           // 流量任务的固定目标流量（KiB）
 	CreatedAt    int64             `json:"createdAt" gorm:"autoCreateTime:milli"` // 创建时间（时间戳毫秒）
 	UpdatedAt    int64             `json:"updatedAt" gorm:"autoUpdateTime:milli"` // 更新时间（时间戳毫秒）
 

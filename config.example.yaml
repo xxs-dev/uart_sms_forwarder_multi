@@ -43,5 +43,5 @@ App:
     #   Port: "/dev/serial/by-id/..."
     #   Disabled: false
   Scheduler:
-    # 必填：流量保活任务使用的固定静态文件。建议自建约 4 KB 的 HTTP 文件，减少 TLS 额外流量。
+    # 必填：流量保活任务使用的固定静态文件。建议自建 50 KiB 的 HTTP 文件；实际资费以运营商为准。
     TrafficEndpoint: "http://your-server.example/uart-traffic/payload.bin"
