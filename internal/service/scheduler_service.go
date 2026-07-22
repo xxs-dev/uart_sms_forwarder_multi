@@ -16,15 +16,29 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	trafficFlightModeHold   = 5 * time.Second
+	trafficNetworkReadyWait = 20 * time.Second
+)
+
+type trafficModule interface {
+	ConsumeTraffic(context.Context, int, string) (TrafficResult, error)
+	SetFlymode(bool) error
+	FlyMode() bool
+	ModuleID() string
+	ModuleName() string
+}
+
 // SchedulerService 定时任务调度服务（包含任务管理功能）
 type SchedulerService struct {
-	logger          *zap.Logger
-	cron            *cron.Cron
-	repo            *repo.ScheduledTaskRepo
-	serialManager   *SerialManager
-	trafficEndpoint string
-	trafficRecords  *TrafficRecordService
-	executionMu     sync.Mutex
+	logger              *zap.Logger
+	cron                *cron.Cron
+	repo                *repo.ScheduledTaskRepo
+	serialManager       *SerialManager
+	trafficEndpoint     string
+	trafficRecords      *TrafficRecordService
+	trafficRecoveryWait func(context.Context, time.Duration) error
+	executionMu         sync.Mutex
 }
 
 // NewSchedulerService 创建定时任务服务实例
@@ -36,11 +50,12 @@ func NewSchedulerService(
 	trafficRecords *TrafficRecordService,
 ) *SchedulerService {
 	return &SchedulerService{
-		logger:          logger,
-		repo:            repo.NewScheduledTaskRepo(db),
-		serialManager:   serialManager,
-		trafficEndpoint: trafficEndpoint,
-		trafficRecords:  trafficRecords,
+		logger:              logger,
+		repo:                repo.NewScheduledTaskRepo(db),
+		serialManager:       serialManager,
+		trafficEndpoint:     trafficEndpoint,
+		trafficRecords:      trafficRecords,
+		trafficRecoveryWait: waitForTrafficRecovery,
 	}
 }
 
@@ -295,11 +310,31 @@ func (s *SchedulerService) executeSMSTask(ctx context.Context, task models.Sched
 	return nil
 }
 
-func (s *SchedulerService) executeTrafficTask(ctx context.Context, task models.ScheduledTask, serialService *SerialService) error {
+func (s *SchedulerService) executeTrafficTask(ctx context.Context, task models.ScheduledTask, serialService trafficModule) error {
 	result, err := serialService.ConsumeTraffic(ctx, task.TrafficKB, s.trafficEndpoint)
+	retriedAfterRecovery := false
+	if err == nil && !serialService.FlyMode() && shouldRecoverTrafficData(result) {
+		failureReason := trafficFailureReason(result)
+		s.saveTrafficRecord(ctx, task, serialService, result, false, failureReason+"；准备自动重建蜂窝数据连接")
+		s.logger.Warn("蜂窝流量请求超时，自动重建数据连接后重试一次",
+			zap.String("task_id", task.ID),
+			zap.String("module_id", serialService.ModuleID()),
+			zap.String("request_id", result.RequestID))
+		if recoveryErr := s.recoverTrafficData(ctx, serialService); recoveryErr != nil {
+			detail := fmt.Sprintf("模块 %s；%s；自动重建蜂窝数据连接失败：%v", serialService.ModuleName(), failureReason, recoveryErr)
+			_ = s.UpdateLastRun(ctx, task.ID, result.RequestID, models.LastRunStatusFailed, detail)
+			return fmt.Errorf("自动重建蜂窝数据连接失败: %w", recoveryErr)
+		}
+		retriedAfterRecovery = true
+		result, err = serialService.ConsumeTraffic(ctx, task.TrafficKB, s.trafficEndpoint)
+	}
 	if err != nil {
-		s.saveTrafficRecord(ctx, task, serialService, result, false, err.Error())
-		detail := fmt.Sprintf("模块 %s；流量任务失败：%v", serialService.ModuleName(), err)
+		failureReason := err.Error()
+		if retriedAfterRecovery {
+			failureReason = "自动重建蜂窝数据连接后重试失败：" + failureReason
+		}
+		s.saveTrafficRecord(ctx, task, serialService, result, false, failureReason)
+		detail := fmt.Sprintf("模块 %s；流量任务失败：%s", serialService.ModuleName(), failureReason)
 		_ = s.UpdateLastRun(ctx, task.ID, result.RequestID, models.LastRunStatusFailed, detail)
 		return err
 	}
@@ -310,12 +345,14 @@ func (s *SchedulerService) executeTrafficTask(ctx context.Context, task models.S
 		result.DownlinkBytes, result.TotalBytes, result.BodyBytes,
 	)
 	if !result.Success {
-		s.saveTrafficRecord(ctx, task, serialService, result, false, result.Error)
-		if result.Error != "" {
-			detail += "；失败原因：" + result.Error
+		failureReason := trafficFailureReason(result)
+		if retriedAfterRecovery {
+			failureReason = "自动重建蜂窝数据连接后重试仍失败：" + failureReason
 		}
+		s.saveTrafficRecord(ctx, task, serialService, result, false, failureReason)
+		detail += "；失败原因：" + failureReason
 		_ = s.UpdateLastRun(ctx, task.ID, result.RequestID, models.LastRunStatusFailed, detail)
-		return fmt.Errorf("流量任务失败: %s", result.Error)
+		return fmt.Errorf("流量任务失败: %s", failureReason)
 	}
 	if result.ConnectionOpen {
 		s.saveTrafficRecord(ctx, task, serialService, result, false, "HTTP 连接未关闭")
@@ -324,6 +361,9 @@ func (s *SchedulerService) executeTrafficTask(ctx context.Context, task models.S
 		return fmt.Errorf("流量任务结束后 HTTP 连接仍处于打开状态")
 	}
 	s.saveTrafficRecord(ctx, task, serialService, result, true, "")
+	if retriedAfterRecovery {
+		detail += "；自动重建蜂窝数据连接后重试成功"
+	}
 
 	if err := s.UpdateLastRun(ctx, task.ID, result.RequestID, models.LastRunStatusSuccess, detail); err != nil {
 		return fmt.Errorf("保存流量任务结果失败: %w", err)
@@ -334,7 +374,7 @@ func (s *SchedulerService) executeTrafficTask(ctx context.Context, task models.S
 func (s *SchedulerService) saveTrafficRecord(
 	ctx context.Context,
 	task models.ScheduledTask,
-	serialService *SerialService,
+	serialService trafficModule,
 	result TrafficResult,
 	success bool,
 	errorMessage string,
@@ -363,6 +403,69 @@ func (s *SchedulerService) saveTrafficRecord(
 			zap.String("task_id", task.ID),
 			zap.String("request_id", result.RequestID),
 			zap.Error(err))
+	}
+}
+
+func shouldRecoverTrafficData(result TrafficResult) bool {
+	return !result.Success && result.HTTPCode == -8 && result.UplinkBytes == 0 &&
+		result.DownlinkBytes == 0 && result.TotalBytes == 0 && result.BodyBytes == 0
+}
+
+func trafficFailureReason(result TrafficResult) string {
+	descriptions := map[int64]string{
+		-1: "HTTP 底层状态异常",
+		-2: "HTTP 响应头异常",
+		-3: "HTTP 响应体异常",
+		-4: "连接服务器失败，可能未联网或地址无效",
+		-5: "连接被提前断开",
+		-6: "接收数据失败",
+		-7: "下载过程失败",
+		-8: "连接或读取超时",
+		-9: "FOTA 数据异常",
+	}
+	if description, ok := descriptions[result.HTTPCode]; ok {
+		return fmt.Sprintf("HTTP %d（%s）", result.HTTPCode, description)
+	}
+	if result.Error != "" {
+		return result.Error
+	}
+	return "模块未返回失败原因"
+}
+
+func (s *SchedulerService) recoverTrafficData(ctx context.Context, serialService trafficModule) (err error) {
+	if err = serialService.SetFlymode(true); err != nil {
+		return fmt.Errorf("启用飞行模式失败: %w", err)
+	}
+	flymodeEnabled := true
+	defer func() {
+		if flymodeEnabled {
+			if disableErr := serialService.SetFlymode(false); err == nil && disableErr != nil {
+				err = fmt.Errorf("关闭飞行模式失败: %w", disableErr)
+			}
+		}
+	}()
+
+	if err = s.trafficRecoveryWait(ctx, trafficFlightModeHold); err != nil {
+		return err
+	}
+	if err = serialService.SetFlymode(false); err != nil {
+		return fmt.Errorf("关闭飞行模式失败: %w", err)
+	}
+	flymodeEnabled = false
+	if err = s.trafficRecoveryWait(ctx, trafficNetworkReadyWait); err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitForTrafficRecovery(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("等待蜂窝数据连接恢复被取消: %w", ctx.Err())
+	case <-timer.C:
+		return nil
 	}
 }
 

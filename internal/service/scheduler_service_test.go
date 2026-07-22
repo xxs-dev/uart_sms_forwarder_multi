@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,27 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+type fakeTrafficModule struct {
+	results      []TrafficResult
+	consumeCalls int
+	flymodeCalls []bool
+}
+
+func (f *fakeTrafficModule) ConsumeTraffic(context.Context, int, string) (TrafficResult, error) {
+	result := f.results[f.consumeCalls]
+	f.consumeCalls++
+	return result, nil
+}
+
+func (f *fakeTrafficModule) SetFlymode(enabled bool) error {
+	f.flymodeCalls = append(f.flymodeCalls, enabled)
+	return nil
+}
+
+func (f *fakeTrafficModule) FlyMode() bool      { return false }
+func (f *fakeTrafficModule) ModuleID() string   { return "sim2" }
+func (f *fakeTrafficModule) ModuleName() string { return "Air780EHV" }
 
 func newSchedulerTestService(t *testing.T) (*SchedulerService, *gorm.DB) {
 	t.Helper()
@@ -135,5 +157,94 @@ func TestSchedulerRetryAndIntervalRules(t *testing.T) {
 				t.Fatalf("shouldExecuteTask()=%v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestTrafficTimeoutResetsCellularDataAndRetriesOnce(t *testing.T) {
+	service, db := newSchedulerTestService(t)
+	service.trafficRecoveryWait = func(context.Context, time.Duration) error { return nil }
+	task := models.ScheduledTask{
+		ID:           "traffic-timeout",
+		Name:         "90 day keepalive",
+		Enabled:      true,
+		IntervalDays: 90,
+		TaskType:     models.ScheduledTaskTypeTraffic,
+		ModuleID:     "sim2",
+		TrafficKB:    models.FixedTrafficKB,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	module := &fakeTrafficModule{results: []TrafficResult{
+		{RequestID: "first", HTTPCode: -8, Error: "HTTP status -8"},
+		{
+			RequestID: "second", Success: true, HTTPCode: 200,
+			UplinkBytes: 1480, DownlinkBytes: 53256, TotalBytes: 54736, BodyBytes: 51200,
+		},
+	}}
+	if err := service.executeTrafficTask(context.Background(), task, module); err != nil {
+		t.Fatalf("execute traffic task: %v", err)
+	}
+	if module.consumeCalls != 2 {
+		t.Fatalf("consume calls=%d, want 2", module.consumeCalls)
+	}
+	if len(module.flymodeCalls) != 2 || !module.flymodeCalls[0] || module.flymodeCalls[1] {
+		t.Fatalf("flymode calls=%v, want [true false]", module.flymodeCalls)
+	}
+
+	updated, err := service.GetById(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.LastRunStatus != models.LastRunStatusSuccess {
+		t.Fatalf("last status=%q, want success", updated.LastRunStatus)
+	}
+	if !strings.Contains(updated.LastRunDetail, "自动重建蜂窝数据连接后重试成功") {
+		t.Fatalf("last detail=%q, want recovery detail", updated.LastRunDetail)
+	}
+
+	var firstRecord models.TrafficRecord
+	if err := db.Where("request_id = ?", "first").First(&firstRecord).Error; err != nil {
+		t.Fatalf("get first traffic record: %v", err)
+	}
+	if firstRecord.Success || !strings.Contains(firstRecord.Error, "连接或读取超时") {
+		t.Fatalf("first record=%+v, want explained timeout", firstRecord)
+	}
+	var secondRecord models.TrafficRecord
+	if err := db.Where("request_id = ?", "second").First(&secondRecord).Error; err != nil {
+		t.Fatalf("get second traffic record: %v", err)
+	}
+	if !secondRecord.Success || secondRecord.HTTPCode != 200 {
+		t.Fatalf("second record=%+v, want successful retry", secondRecord)
+	}
+}
+
+func TestTrafficNonTimeoutDoesNotResetCellularData(t *testing.T) {
+	service, db := newSchedulerTestService(t)
+	task := models.ScheduledTask{
+		ID:           "traffic-server-error",
+		Name:         "server error",
+		Enabled:      true,
+		IntervalDays: 90,
+		TaskType:     models.ScheduledTaskTypeTraffic,
+		ModuleID:     "sim2",
+		TrafficKB:    models.FixedTrafficKB,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	module := &fakeTrafficModule{results: []TrafficResult{{
+		RequestID: "server-error", HTTPCode: 500, Error: "HTTP status 500",
+	}}}
+
+	if err := service.executeTrafficTask(context.Background(), task, module); err == nil {
+		t.Fatal("expected traffic failure")
+	}
+	if module.consumeCalls != 1 {
+		t.Fatalf("consume calls=%d, want 1", module.consumeCalls)
+	}
+	if len(module.flymodeCalls) != 0 {
+		t.Fatalf("flymode calls=%v, want none", module.flymodeCalls)
 	}
 }

@@ -2,24 +2,30 @@
 
 基于 [dushixiang/uart_sms_forwarder](https://github.com/dushixiang/uart_sms_forwarder) 扩展的 Air780 系列短信与来电管理平台。本版本增加多模块统一管理、按模块收发短信、SIM 卡资料、通话记录、定时流量保活和可配置的无应答呼叫转移。
 
-> 当前平台发布版：`v1.3.0-multi.3`
+> 当前平台发布版：`v1.3.0-multi.4`
 > Lua 插件版本：Air780EPV `1.4.0`；Air780EHV / 通用脚本 `1.3.0`
 
 ## 已验证环境
 
-验证日期：2026-07-21
+验证日期：2026-07-22
 
 | 项目 | 已验证配置 | 结果 |
 | --- | --- | --- |
 | 上位机 | Linux x86_64、Docker、SQLite | 通过 |
 | 模块 1 | Air780EPV、定制 V1002 PDU 固件、Lua 插件 `1.4.0` | 在线、状态读取、短信 PDU 上报及流量任务通过 |
-| 模块 2 | Air780EHV、`LuatOS-SoC_V2036_Air780EHV_116.soc`、Lua 插件 `1.3.0` | 在线、状态读取、来电及流量任务通过 |
+| 模块 2 | Air780EHV、`LuatOS-SoC_V2036_Air780EHV_116.soc`、实机 Lua 插件 `1.2.2` | 在线、状态读取、来电及 PDP 重建后 50 KiB 流量任务通过；仓库插件仍为 `1.3.0` |
 | 多模块 | 两个 USB 串口同时运行 | `2/2` 在线 |
 | EHV 来电 | 真实来电、挂断事件及 5 秒持续时长 | 数据库、API、桌面和手机页面均通过 |
-| 平台 `v1.3.0-multi.2` | 双模块状态、SIM 卡资料、PDU 解码、通知标识、来电记录与无应答转移 | 通过 |
+| 平台 `v1.3.0-multi.4` | 双模块状态、SIM 卡资料、PDU 解码、通知标识、来电记录、无应答转移及流量超时自动恢复 | 通过 |
 | Lua 插件 | EPV `1.4.0`、EHV / 通用脚本 `1.3.0` | 通过；真实运营商转移仍需按号码单独验证 |
 | 前端 | 桌面端及 390 px 手机端 | 通过，无横向溢出 |
 | 自动测试 | `go test ./...`、`npm run build`、本次改动定向 ESLint | 通过 |
+
+## v1.3.0-multi.4 更新
+
+- LuatOS HTTP 负状态码会显示明确原因，例如 `-8` 显示为“连接或读取超时”，不再只显示难以判断的数字。
+- 流量任务仅在 `HTTP -8` 且上行、下行、响应体均为 `0 B` 时自动开关一次飞行模式，等待蜂窝数据连接恢复后重试一次；其他 HTTP 错误不会重置模块，也不会无限重试。
+- 真实 Air780EHV 在长期驻网后复现 PDP 数据承载失效；手动重建连接后一次请求成功，平台记录 `HTTP 200`、响应体 `51,200 B`、模块计数合计 `54,736 B`。自动恢复逻辑已用回归测试覆盖，模块无需重刷固件。
 
 ## v1.3.0-multi.3 更新
 
@@ -41,6 +47,7 @@
 | Air780EPV | 200 | 460 B | 4,751 B | 5,211 B | 已关闭 |
 | Air780EHV | 200 | 479 B | 4,631 B | 5,110 B | 已关闭 |
 | Air780EPV（50 KiB 受控测试） | 200 | 1,460 B | 53,256 B | 54,716 B | 已关闭 |
+| Air780EHV（PDP 重建后 50 KiB） | 200 | 1,480 B | 53,256 B | 54,736 B | 已关闭 |
 
 ## 功能
 
@@ -177,8 +184,8 @@ go build -o uart_sms_forwarder ./cmd/serv
 
 当前验证镜像：
 
-- Docker Hub：`s121934/uart_sms_forwarder_multi:1.3.0-multi.3`
-- GHCR：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.3.0-multi.3`
+- Docker Hub：`s121934/uart_sms_forwarder_multi:1.3.0-multi.4`
+- GHCR：`ghcr.io/xxs-dev/uart_sms_forwarder_multi:1.3.0-multi.4`
 
 ## 数据与升级
 
